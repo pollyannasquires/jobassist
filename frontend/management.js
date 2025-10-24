@@ -39,7 +39,6 @@ async function loadCompanyList() {
         listDiv.innerHTML = `Error loading list: ${error.message}`;
     }
 }
-
 // ----------------------------------------------------------------------
 // 2. LOAD DETAILS FOR SELECTED COMPANY
 // ----------------------------------------------------------------------
@@ -58,8 +57,8 @@ async function selectCompany(id, element) {
 
         if (response.ok) {
             document.getElementById('detailTitle').textContent = `Editing: ${company.company_name_clean}`;
-           
-    // Display Mapped Raw Names
+            
+            // --- RENDER MAPPED RAW NAMES ---
             const mappedList = document.getElementById('mappedNamesList');
             mappedList.innerHTML = ''; // Clear previous list
 
@@ -71,8 +70,35 @@ async function selectCompany(id, element) {
                 });
             } else {
                 mappedList.innerHTML = '<li>No raw names mapped yet.</li>';
-            } 
-            // Populate Form Fields
+            }
+            
+            // --- RENDER ASSOCIATED CONTACTS ---
+            const contactList = document.getElementById('contactList');
+            contactList.innerHTML = ''; // Clear previous list
+
+            if (company.contacts && company.contacts.length > 0) {
+                company.contacts.forEach(person => {
+                    const listItem = document.createElement('li');
+                    
+                    let name = `${person.first_name || ''} ${person.last_name || ''}`.trim();
+
+                    if (person.linkedin_url) {
+                        const link = document.createElement('a');
+                        link.href = person.linkedin_url;
+                        link.target = '_blank'; // Open in new tab
+                        link.textContent = name;
+                        listItem.appendChild(link);
+                    } else {
+                        listItem.textContent = name;
+                    }
+                    
+                    contactList.appendChild(listItem);
+                });
+            } else {
+                contactList.innerHTML = '<li>No contacts found linked to this company\'s raw names.</li>';
+            }
+            
+            // --- POPULATE FORM FIELDS ---
             document.getElementById('companyNameClean').value = company.company_name_clean || '';
             document.getElementById('targetInterest').value = String(company.target_interest);
             document.getElementById('sizeEmployees').value = company.size_employees || '';
@@ -92,7 +118,6 @@ async function selectCompany(id, element) {
         displayMessage('error', `Network error: ${error.message}`);
     }
 }
-
 // ----------------------------------------------------------------------
 // 3. SAVE CHANGES (PUT request)
 // ----------------------------------------------------------------------
