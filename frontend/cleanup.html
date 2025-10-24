@@ -1,186 +1,578 @@
+<!-- 
+    Filename: cleanup.html
+    Last Edited: 2025-10-24
+    Purpose: The initial data administration tool for systematically mapping unique Raw Company Names to standardized Clean Company Profiles.
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Company Cleanup & Mapping</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Company Cleanup Interface</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 1200px; 
-            margin: 20px auto;
-            display: flex; 
-            gap: 30px; 
-            flex-wrap: wrap; /* Allows nav to wrap above panels */
+        /* Custom scrollbar for the unmapped names list */
+        .raw-names-list::-webkit-scrollbar {
+            width: 8px;
         }
-        nav {
-            width: 100%;
-            margin-bottom: 20px; 
-            padding-bottom: 10px; 
-            border-bottom: 2px solid #007bff; 
-        }
-        .list-panel { 
-            width: 300px; 
-            border-right: 1px solid #ddd; 
-            padding-right: 20px; 
-            overflow-y: auto; 
-            max-height: 85vh; 
-        }
-        .detail-panel { 
-            flex-grow: 1; 
-            padding-left: 10px;
-        }
-
-        /* List Styling */
-        .raw-name-item { 
-            padding: 8px; 
-            cursor: pointer; 
-            border-bottom: 1px dashed #eee; 
-            overflow: hidden; 
-            text-overflow: ellipsis; 
-            white-space: nowrap;
-        }
-        .raw-name-item:hover, .raw-name-item.selected { 
-            background-color: #e6f7ff; 
-            font-weight: bold; 
-        }
-
-        h1 { color: #007bff; margin-top: 0; }
-        
-        #rawNameDisplay {
-            font-size: 1.5em;
-            font-weight: bold;
-            margin: 20px 0;
-            padding: 15px;
-            border: 2px solid #007bff;
-            border-radius: 6px;
-            text-align: center;
-            background-color: #f8faff;
-        }
-        
-        /* Input & Form Styling */
-        label { display: block; margin-top: 15px; font-weight: bold; }
-        input[type="text"], input[type="number"], select {
-            width: 100%;
-            padding: 10px;
-            margin-top: 5px;
-            box-sizing: border-box;
-            border: 1px solid #aaa;
+        .raw-names-list::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1; /* slate-300 */
             border-radius: 4px;
         }
-        
-        .action-panel {
-            margin-top: 25px;
-            padding: 20px;
-            border-radius: 6px;
+        .raw-names-list::-webkit-scrollbar-track {
+            background-color: #f1f5f9; /* slate-100 */
         }
-
-        #mapToExistingPanel { border: 1px solid #28a745; background-color: #f1fff5; }
-        #createNewPanel { border: 1px solid #ffc107; background-color: #fff9e6; }
-        
-        .button-group { margin-top: 15px; display: flex; gap: 10px; }
-        .button-group button {
-            padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; flex-grow: 1;
-        }
-        
-        #mapExistingButton { background-color: #28a745; color: white; }
-        #createNewButton { background-color: #ffc107; color: #333; }
-        #skipButton { background-color: #6c757d; color: white; margin-top: 20px; width: 100%; }
-
-        #batchActionButton {
-            background-color: #dc3545; /* Red for batch operation */
-            color: white;
-            padding: 10px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            width: 100%;
-            font-weight: bold;
-            margin-bottom: 15px;
-            /* This is the key line: it's hidden in the HTML, and shown by JS once the list loads */
-            display: none; 
-        }
-        #batchActionButton:hover {
-            background-color: #c82333;
-        }
-
-        .message { padding: 10px; margin-top: 15px; border-radius: 4px; text-align: center; }
-        .message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        /* Inter font setup */
+        html { font-family: 'Inter', sans-serif; }
     </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-blue': '#1e40af', /* Blue 700 */
+                        'primary-light': '#60a5fa', /* Blue 400 */
+                        'error-red': '#dc2626',
+                        'success-green': '#10b981',
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body>
-    <nav>
-        <a href="management.html" style="font-weight: bold; color: #007bff; text-decoration: none; font-size: 1.1em;">
-            Go to Company Management &gt;&gt;
-        </a>
-    </nav>
-    
-    <div class="list-panel">
-        <h2>Unmapped Raw Names</h2>
-        <!-- THE BUTTON CALLS THE JAVASCRIPT FUNCTION -->
-        <button id="batchActionButton" onclick="batchCreateAndMap()">
-            Batch Create & Map All to Target (YES)
-        </button>
-        <div id="unmappedList">Loading names...</div>
-    </div>
-    
-    <div class="detail-panel">
-        <h1>Company Cleanup Interface</h1>
-        
-        <div id="messageDisplay" class="message" style="display:none;"></div>
+<body class="bg-gray-50 min-h-screen">
 
-        <div id="rawNameDisplay">Select a company name from the list.</div>
-        
-        <!-- ============================================== -->
-        <!-- 1. MAP TO EXISTING PROFILE SECTION -->
-        <!-- ============================================== -->
-        <div id="mapToExistingPanel" class="action-panel" style="display: none;">
-            <h3>1. Map to Existing Company Profile</h3>
+    <!-- Global Navigation Bar -->
+    <header class="bg-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex-shrink-0 flex items-center">
+                    <span class="text-xl font-bold text-primary-blue">JobAssist: Data Cleanup</span>
+                </div>
+                <nav class="flex space-x-4">
+                    <a href="index.html" class="text-gray-600 hover:text-primary-blue px-3 py-2 rounded-lg text-sm font-medium transition duration-150">
+                        <i data-lucide="layout-dashboard" class="w-4 h-4 inline-block mr-1"></i> Dashboard
+                    </a>
+                    <a href="cleanup.html" class="bg-primary-blue text-white px-3 py-2 rounded-lg text-sm font-medium" aria-current="page">
+                        <i data-lucide="link-2" class="w-4 h-4 inline-block mr-1"></i> Cleanup (Mapping)
+                    </a>
+                    <a href="management.html" class="text-gray-600 hover:text-primary-blue px-3 py-2 rounded-lg text-sm font-medium transition duration-150">
+                        <i data-lucide="briefcase" class="w-4 h-4 inline-block mr-1"></i> Management
+                    </a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        <h1 class="text-3xl font-extrabold text-gray-900 mb-6 flex items-center">
+            <i data-lucide="layers-3" class="w-7 h-7 mr-3 text-primary-blue"></i> Company Standardization Tool
+        </h1>
+
+        <!-- Two-Column Layout (Sidebar and Main Form) -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
             
-            <label for="existingCleanName">Search & Select Existing Clean Name:</label>
-            <input type="text" id="existingCleanName" list="existingCleanNameList" placeholder="Start typing the clean name...">
-            <datalist id="existingCleanNameList"></datalist>
-
-            <div class="button-group">
-                <button type="button" id="mapExistingButton" onclick="submitMapping('map')">
-                    Map Raw Name to Existing
+            <!-- Left Panel: Unmapped Raw Names List -->
+            <div class="lg:col-span-1 bg-white rounded-xl shadow-lg p-4 h-full flex flex-col">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2 flex justify-between items-center">
+                    Unmapped Raw Names
+                    <span id="nameCount" class="text-xs font-medium bg-red-100 text-red-800 px-2 py-0.5 rounded-full">0 remaining</span>
+                </h2>
+                <div id="rawNamesList" class="raw-names-list overflow-y-auto space-y-1 flex-grow min-h-[200px] lg:min-h-[70vh]">
+                    <!-- List items will be rendered here -->
+                    <div id="loadingIndicator" class="text-center py-10 text-gray-500 hidden">
+                        <i data-lucide="loader-circle" class="w-6 h-6 animate-spin mx-auto mb-2"></i>
+                        Loading names...
+                    </div>
+                    <div id="emptyState" class="text-center py-10 text-gray-500 hidden">
+                        <i data-lucide="check-circle-2" class="w-6 h-6 mx-auto mb-2 text-success-green"></i>
+                        All names have been mapped!
+                    </div>
+                </div>
+                <button id="batchMapBtn" onclick="handleBatchMap()" class="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md flex items-center justify-center disabled:opacity-50" disabled>
+                    <i data-lucide="rabbit" class="w-5 h-5 mr-2"></i> Batch Create & Map All to Target (YES)
                 </button>
             </div>
-        </div>
 
-        <!-- ============================================== -->
-        <!-- 2. CREATE NEW PROFILE SECTION -->
-        <!-- ============================================== -->
-        <div id="createNewPanel" class="action-panel" style="display: none;">
-            <h3>2. Create & Map New Company Profile</h3>
+            <!-- Right Panel: Mapping Workflow Form -->
+            <div class="lg:col-span-3 bg-white rounded-xl shadow-lg p-6 flex flex-col">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">Mapping Workflow</h2>
+                
+                <!-- Current Raw Name Display -->
+                <div class="mb-6 p-4 bg-gray-100 border-l-4 border-primary-blue rounded-lg">
+                    <p class="text-sm font-medium text-gray-600">Currently Processing Raw Name:</p>
+                    <p id="currentRawNameDisplay" class="text-2xl font-extrabold text-primary-blue truncate">Select a name from the left to begin.</p>
+                </div>
+                
+                <!-- Status/Message Area -->
+                <div id="messageArea" class="mb-6 p-3 rounded-lg text-sm transition duration-300 hidden"></div>
 
-            <label for="newCleanName">New Clean Name (Will be created):</label>
-            <input type="text" id="newCleanName" placeholder="Enter the exact name for the new profile">
+                <!-- --- MAPPING ACTIONS --- -->
 
-            <div class="button-group">
-                <button type="button" id="createNewButton" onclick="submitMapping('create')">
-                    Create New Profile & Map
-                </button>
+                <div class="space-y-8">
+                    
+                    <!-- Action 1: Map to Existing Clean Profile -->
+                    <div class="border-b pb-6">
+                        <h3 class="text-xl font-semibold text-primary-blue mb-4 flex items-center">
+                            <span class="mr-2 text-2xl font-extrabold">1.</span> Map to Existing Clean Profile
+                        </h3>
+                        <p class="text-sm text-gray-600 mb-4">Link the raw name to a standardized company profile that already exists (e.g., link "Alphabet" to "Google"). Requires API 1.2 and 1.3/1.4.</p>
+                        
+                        <div class="flex space-x-4">
+                            <div class="flex-grow relative">
+                                <input type="text" id="existingSearchInput" oninput="fetchSuggestions(this.value)" placeholder="Search & Select Existing Clean Name (e.g., 'Google')" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-light focus:border-primary-light transition duration-150" disabled>
+                                <div id="suggestionDropdown" class="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto hidden">
+                                    <!-- Suggestions will be rendered here -->
+                                </div>
+                            </div>
+                            <button id="mapExistingBtn" onclick="handleMapExisting()" class="bg-primary-blue hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-md whitespace-nowrap disabled:opacity-50" disabled>
+                                Map Raw Name to Existing
+                            </button>
+                        </div>
+                        <p id="selectedExisting" class="mt-2 text-sm text-green-700 font-medium"></p>
+                    </div>
+
+                    <!-- Action 2: Create & Map New Profile -->
+                    <div class="border-b pb-6">
+                        <h3 class="text-xl font-semibold text-primary-blue mb-4 flex items-center">
+                            <span class="mr-2 text-2xl font-extrabold">2.</span> Create & Map New Profile
+                        </h3>
+                        <p class="text-sm text-gray-600 mb-4">The raw name is for a new, distinct company profile that you want to create. Requires API 1.4.</p>
+
+                        <div class="flex space-x-4">
+                            <input type="text" id="newCleanNameInput" placeholder="Enter New Standardized Clean Name (e.g., 'Acme Corp')" class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-primary-light focus:border-primary-light transition duration-150" disabled>
+                            <button id="createNewBtn" onclick="handleCreateNew()" class="bg-primary-blue hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-md whitespace-nowrap disabled:opacity-50" disabled>
+                                Create New Profile & Map
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Action 3: Skip & Self-Map -->
+                    <div>
+                        <h3 class="text-xl font-semibold text-primary-blue mb-4 flex items-center">
+                            <span class="mr-2 text-2xl font-extrabold">3.</span> Skip & Self-Map
+                        </h3>
+                        <p class="text-sm text-gray-600 mb-4">The raw name is already clean and should simply become its own profile. Requires API 1.4.</p>
+                        
+                        <button id="selfMapBtn" onclick="handleSelfMap()" class="w-auto bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-md flex items-center disabled:opacity-50" disabled>
+                            <i data-lucide="skip-forward" class="w-5 h-5 mr-2"></i> Skip & Map Raw Name to Itself
+                        </button>
+                    </div>
+
+                </div>
             </div>
-        </div>
-        
-        <!-- ============================================== -->
-        <!-- 3. SKIP ACTION -->
-        <!-- ============================================== -->
-        <button type="button" id="skipButton" onclick="submitMapping('skip')">
-            Skip & Map Raw Name to Itself
-        </button>
-        
-    </div>
 
-    <script src="app.js"></script>
+        </div>
+    </main>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // API Endpoints based on the API Reference (Assumed to be implemented on the backend)
+        const API_BASE = '/api';
+        let unmappedNames = []; // The list of raw names from API 1.1
+        let currentRawName = null;
+        let selectedCompanyId = null; // Used for Action 1 (Map to Existing)
+        let selectedCompanyName = null;
+        let isProcessing = false;
+
+        const elements = {
+            listContainer: document.getElementById('rawNamesList'),
+            nameCount: document.getElementById('nameCount'),
+            loadingIndicator: document.getElementById('loadingIndicator'),
+            emptyState: document.getElementById('emptyState'),
+            currentRawNameDisplay: document.getElementById('currentRawNameDisplay'),
+            messageArea: document.getElementById('messageArea'),
+            existingSearchInput: document.getElementById('existingSearchInput'),
+            suggestionDropdown: document.getElementById('suggestionDropdown'),
+            mapExistingBtn: document.getElementById('mapExistingBtn'),
+            selectedExisting: document.getElementById('selectedExisting'),
+            newCleanNameInput: document.getElementById('newCleanNameInput'),
+            createNewBtn: document.getElementById('createNewBtn'),
+            selfMapBtn: document.getElementById('selfMapBtn'),
+            batchMapBtn: document.getElementById('batchMapBtn')
+        };
+
+        // --- Utility Functions ---
+
+        /** Displays a message in the message area. */
+        function showMessage(type, message) {
+            elements.messageArea.className = 'mb-6 p-3 rounded-lg text-sm transition duration-300';
+            elements.messageArea.classList.remove('hidden');
+
+            if (type === 'success') {
+                elements.messageArea.classList.add('bg-success-green/10', 'text-success-green', 'border', 'border-success-green');
+            } else if (type === 'error') {
+                elements.messageArea.classList.add('bg-error-red/10', 'text-error-red', 'border', 'border-error-red');
+            } else if (type === 'info') {
+                elements.messageArea.classList.add('bg-primary-light/10', 'text-primary-blue', 'border', 'border-primary-light');
+            }
+            elements.messageArea.innerHTML = message;
+            // Hide message after 5 seconds
+            setTimeout(() => {
+                elements.messageArea.classList.add('hidden');
+            }, 5000);
+        }
+
+        /** Enable/Disable all action buttons based on processing state */
+        function setControlsEnabled(enabled) {
+            // Note: Batch button disablement is also managed by unmappedNames.length
+            elements.existingSearchInput.disabled = !enabled;
+            elements.mapExistingBtn.disabled = !enabled || !selectedCompanyId; // Only enabled if a selection is made
+            elements.newCleanNameInput.disabled = !enabled;
+            elements.createNewBtn.disabled = !enabled;
+            elements.selfMapBtn.disabled = !enabled;
+            elements.batchMapBtn.disabled = !enabled || unmappedNames.length === 0;
+
+            isProcessing = !enabled;
+        }
+
+        /** Resets the search and selection state for the "Map to Existing" section */
+        function resetExistingMapState() {
+            selectedCompanyId = null;
+            selectedCompanyName = null;
+            elements.mapExistingBtn.disabled = true;
+            elements.selectedExisting.textContent = '';
+            elements.existingSearchInput.value = '';
+            elements.suggestionDropdown.classList.add('hidden');
+        }
+
+        // --- Core Application Logic ---
+
+        /** Selects a raw name for processing */
+        function selectRawName(name) {
+            currentRawName = name;
+            elements.currentRawNameDisplay.textContent = name;
+            
+            // Highlight the selected item in the list
+            document.querySelectorAll('#rawNamesList button').forEach(btn => {
+                btn.classList.remove('bg-primary-light/20', 'ring-2', 'ring-primary-blue');
+            });
+            // Use base64 encoding to safely create an ID from a string that might contain special chars
+            const selectedBtn = document.getElementById(`raw-name-${btoa(name)}`);
+            if (selectedBtn) {
+                selectedBtn.classList.add('bg-primary-light/20', 'ring-2', 'ring-primary-blue');
+            }
+            
+            // Reset form state for new name
+            elements.newCleanNameInput.value = name; // Pre-fill for convenience
+            resetExistingMapState();
+
+            // Enable action controls
+            setControlsEnabled(true);
+        }
+
+        /** Renders the unmapped list and handles state */
+        function renderUnmappedList() {
+            elements.listContainer.innerHTML = '';
+            elements.nameCount.textContent = `${unmappedNames.length} remaining`;
+            
+            if (unmappedNames.length === 0) {
+                elements.emptyState.classList.remove('hidden');
+                elements.currentRawNameDisplay.textContent = 'All names have been mapped!';
+                setControlsEnabled(false);
+                return;
+            } else {
+                elements.emptyState.classList.add('hidden');
+            }
+
+            unmappedNames.forEach(name => {
+                const button = document.createElement('button');
+                button.id = `raw-name-${btoa(name)}`; // Use base64 for ID safety
+                button.className = 'w-full text-left p-2 rounded-lg hover:bg-gray-100 transition duration-100 text-sm truncate border-b border-gray-100';
+                button.textContent = name;
+                button.onclick = () => selectRawName(name);
+                elements.listContainer.appendChild(button);
+            });
+
+            // Automatically select the first name
+            selectRawName(unmappedNames[0]);
+            elements.batchMapBtn.disabled = isProcessing;
+        }
+
+        /** Fetches the initial list of unmapped raw names (API 1.1) */
+        async function fetchUnmappedList() {
+            elements.loadingIndicator.classList.remove('hidden');
+            setControlsEnabled(false);
+            
+            try {
+                // API 1.1: GET /api/unmapped_list
+                const response = await fetch(`${API_BASE}/unmapped_list`);
+                if (!response.ok) throw new Error('Failed to fetch unmapped list.');
+                
+                const data = await response.json();
+                unmappedNames = data.raw_names || [];
+                renderUnmappedList();
+            } catch (error) {
+                console.error('API Error:', error);
+                showMessage('error', `Could not load company list. Check API: ${error.message}`);
+                elements.currentRawNameDisplay.textContent = 'Error loading data.';
+            } finally {
+                elements.loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        // --- Mapping Action Handlers ---
+
+        /** Removes the current raw name from the local list and re-renders */
+        function processSuccess() {
+            const index = unmappedNames.indexOf(currentRawName);
+            if (index > -1) {
+                unmappedNames.splice(index, 1);
+            }
+            currentRawName = null;
+            renderUnmappedList();
+            setControlsEnabled(unmappedNames.length > 0); // Re-enable if there are names left
+            if (unmappedNames.length === 0) {
+                 elements.currentRawNameDisplay.textContent = 'Cleanup complete!';
+            }
+        }
+
+        /** Performs a generic POST request for mapping actions (API 1.3/1.4) */
+        async function executeMapping(endpoint, body, successMsg) {
+            if (!currentRawName) return;
+
+            setControlsEnabled(false);
+            showMessage('info', 'Processing mapping...');
+
+            try {
+                // Assuming API 1.3/1.4: POST /api/map (or similar)
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    // Send the raw name being processed and any specific mapping body data
+                    body: JSON.stringify({ ...body, raw_name: currentRawName })
+                });
+
+                const result = await response.json();
+
+                if (!response.ok || result.status === 'error') {
+                    throw new Error(result.message || 'Mapping failed due to a server error.');
+                }
+                
+                showMessage('success', successMsg);
+                processSuccess();
+
+            } catch (error) {
+                console.error('Mapping Error:', error);
+                showMessage('error', `Mapping Error: ${error.message}`);
+            } finally {
+                // Only re-enable if there are still names to process
+                if (currentRawName && unmappedNames.length > 0) setControlsEnabled(true);
+            }
+        }
+
+        // Action 1: Map to Existing (API 1.2 for suggestions, then API 1.3 for map)
+        function handleSelectExisting(id, name) {
+            selectedCompanyId = id;
+            selectedCompanyName = name;
+            elements.existingSearchInput.value = name;
+            elements.selectedExisting.textContent = `Selected: ${name} (ID: ${id})`;
+            elements.suggestionDropdown.classList.add('hidden');
+            elements.mapExistingBtn.disabled = false;
+        }
+        
+        async function handleMapExisting() {
+            if (!selectedCompanyId || !currentRawName) {
+                showMessage('error', 'Please search for and select an existing clean company name.');
+                return;
+            }
+            // Use API endpoint assumed to handle mapping to existing profile
+            await executeMapping(
+                '/map/existing',
+                { company_id: selectedCompanyId },
+                `Successfully mapped "${currentRawName}" to existing profile: "${selectedCompanyName}".`
+            );
+        }
+
+        // Action 2: Create & Map New (API 1.4 - creates profile and maps name)
+        async function handleCreateNew() {
+            const newCleanName = elements.newCleanNameInput.value.trim();
+            if (!newCleanName) {
+                showMessage('error', 'Please provide a standardized name for the new profile.');
+                return;
+            }
+            // Use API endpoint assumed to handle creating new profile and mapping
+            await executeMapping(
+                '/map/new',
+                { new_clean_name: newCleanName },
+                `Successfully created new profile "${newCleanName}" and mapped "${currentRawName}" to it.`
+            );
+        }
+
+        // Action 3: Skip & Self-Map (API 1.4 - creates profile using raw name and maps to it)
+        async function handleSelfMap() {
+            const cleanName = currentRawName; // The raw name becomes the clean name
+            // Use API endpoint assumed to handle creating new profile and mapping
+            await executeMapping(
+                '/map/self',
+                { clean_name: cleanName, target_interest: true }, // Assuming self-map defaults to Target=YES based on context
+                `Successfully created profile for "${cleanName}" and mapped the raw name to itself (Target: YES).`
+            );
+        }
+
+        // Action 4: Batch Processing (API 1.5 - Assuming POST /api/map/batch is used)
+        async function handleBatchMap() {
+            if (unmappedNames.length === 0) {
+                showMessage('info', 'No unmapped names left to batch process.');
+                return;
+            }
+            
+            // Custom modal replacement for window.confirm
+            const confirmAction = await showConfirmationModal(`Batch Processing Confirmation`, 
+                `Are you sure you want to batch process ALL ${unmappedNames.length} remaining raw names? Each will become its own new **Target=YES** profile.`);
+            
+            if (!confirmAction) return;
+
+            setControlsEnabled(false);
+            showMessage('info', `Starting batch processing of ${unmappedNames.length} names... This may take a moment.`);
+
+            try {
+                // Assuming API 1.5: POST /api/map/batch (or similar)
+                const response = await fetch(`${API_BASE}/map/batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}) // Backend handles all remaining names
+                });
+
+                const result = await response.json();
+
+                if (!response.ok || result.status === 'error') {
+                    throw new Error(result.message || 'Batch mapping failed due to a server error.');
+                }
+                
+                // On successful batch, clear local list and update UI
+                unmappedNames = [];
+                renderUnmappedList();
+                showMessage('success', `Batch processing complete! ${result.processed_count || 'All'} raw names were mapped to new, Target(YES) profiles.`);
+
+            } catch (error) {
+                console.error('Batch Mapping Error:', error);
+                showMessage('error', `Batch Mapping Error: ${error.message}`);
+            }
+        }
+
+
+        // --- Suggestions and Autocomplete (API 1.2) ---
+
+        let suggestionTimeout;
+        function fetchSuggestions(query) {
+            clearTimeout(suggestionTimeout);
+            
+            const dropdown = elements.suggestionDropdown;
+            dropdown.innerHTML = '';
+            
+            if (query.length < 2) {
+                dropdown.classList.add('hidden');
+                return;
+            }
+            
+            dropdown.classList.remove('hidden');
+            dropdown.innerHTML = '<div class="p-2 text-sm text-gray-500">Searching...</div>';
+
+            suggestionTimeout = setTimeout(async () => {
+                try {
+                    // API 1.2: GET /api/suggestions?q=...
+                    const response = await fetch(`${API_BASE}/suggestions?q=${encodeURIComponent(query)}`);
+                    if (!response.ok) throw new Error('Search failed.');
+
+                    const data = await response.json();
+                    
+                    dropdown.innerHTML = '';
+                    if (data.suggestions && data.suggestions.length > 0) {
+                        data.suggestions.forEach(item => {
+                            const suggestionDiv = document.createElement('button');
+                            suggestionDiv.className = 'w-full text-left p-2 hover:bg-primary-blue/10 transition duration-100 text-gray-800 text-sm border-b border-gray-100 last:border-b-0';
+                            suggestionDiv.textContent = `${item.company_name_clean} (ID: ${item.company_id})`;
+                            suggestionDiv.onclick = (e) => {
+                                e.preventDefault(); // Prevent form submit if button is inside a form
+                                handleSelectExisting(item.company_id, item.company_name_clean);
+                            }
+                            dropdown.appendChild(suggestionDiv);
+                        });
+                    } else {
+                        dropdown.innerHTML = '<div class="p-2 text-sm text-gray-500">No existing profiles found.</div>';
+                    }
+                } catch (error) {
+                    dropdown.innerHTML = '<div class="p-2 text-sm text-error-red">Error fetching suggestions.</div>';
+                    console.error('Suggestion Fetch Error:', error);
+                }
+            }, 300); // Debounce time
+        }
+
+        /** Custom Confirmation Modal for Batch Processing (replaces window.confirm) */
+        function showConfirmationModal(title, message) {
+            return new Promise(resolve => {
+                const modalId = 'customConfirmModal';
+                let modal = document.getElementById(modalId);
+                
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = modalId;
+                    modal.className = 'fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center transition-opacity hidden';
+                    modal.innerHTML = `
+                        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full m-4">
+                            <div class="p-6 border-b">
+                                <h3 class="text-xl font-bold text-gray-900" id="modalTitle"></h3>
+                            </div>
+                            <div class="p-6" id="modalMessage"></div>
+                            <div class="p-4 border-t flex justify-end space-x-3">
+                                <button id="modalCancel" class="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Cancel</button>
+                                <button id="modalConfirm" class="px-4 py-2 text-white bg-primary-blue rounded-lg hover:bg-blue-800 transition">Confirm</button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(modal);
+                }
+
+                document.getElementById('modalTitle').textContent = title;
+                document.getElementById('modalMessage').innerHTML = `<p class="text-gray-700">${message}</p>`;
+                
+                const confirmBtn = document.getElementById('modalConfirm');
+                const cancelBtn = document.getElementById('modalCancel');
+
+                const cleanup = () => {
+                    modal.classList.add('hidden');
+                    confirmBtn.removeEventListener('click', onConfirm);
+                    cancelBtn.removeEventListener('click', onCancel);
+                };
+
+                const onConfirm = () => {
+                    cleanup();
+                    resolve(true);
+                };
+
+                const onCancel = () => {
+                    cleanup();
+                    resolve(false);
+                };
+
+                confirmBtn.addEventListener('click', onConfirm);
+                cancelBtn.addEventListener('click', onCancel);
+
+                modal.classList.remove('hidden');
+            });
+        }
+
+
+        // Global initialization
+        window.onload = function() {
+            // Initialize Lucide icons
+            lucide.createIcons();
+            
+            // Start the application by fetching the unmapped list
+            fetchUnmappedList();
+        };
+
+        // Clear suggestions if clicking outside the dropdown
+        document.addEventListener('click', (e) => {
+            if (!elements.existingSearchInput.contains(e.target) && !elements.suggestionDropdown.contains(e.target)) {
+                elements.suggestionDropdown.classList.add('hidden');
+            }
+        });
+    </script>
 </body>
 </html>
-```
-
-The key piece that connects the HTML button to the JavaScript function is the **`onclick`** attribute:
-
-```html
-<button id="batchActionButton" onclick="batchCreateAndMap()">
-    Batch Create & Map All to Target (YES)
-</button>

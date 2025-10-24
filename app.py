@@ -1,8 +1,4 @@
-// ~/webapp/contact_app/frontend/app.js (LIST-BASED MAPPING)
-const API_BASE = '/api';
-let currentRawName = null;
-=======
-# app.py
+# FILENAME: app.py | LAST EDITED: 2025-10-24
 from flask import Flask, jsonify, request
 import psycopg2
 import psycopg2.extras # Needed for dictionary cursor
@@ -377,9 +373,10 @@ def get_related_data(company_id):
         cur.execute(sql_raw_names, (company_id,))
         
         # Explicitly ensure raw_names are strings, filter non-values, and get unique list
+        raw_name_rows = cur.fetchall()
         raw_names_list = [
             str(row['raw_name']).strip() 
-            for row in cur.fetchall() 
+            for row in raw_name_rows
             if row['raw_name'] is not None and str(row['raw_name']).strip()
         ]
         
@@ -393,22 +390,32 @@ def get_related_data(company_id):
             placeholders = ', '.join(['%s'] * len(final_raw_names))
             
             # Use the PostgreSQL IN operator with dynamic placeholders
+            # IMPORTANT: Using the correct column names from the contacts table design: 
+            # position (for job_title), email_address (for email), and url (for linkedin_url)
             sql_contacts = f"""
                 SELECT 
                     first_name, 
                     last_name, 
-                    position, -- Keeping position for context
-                    url       -- ADDED: The URL column for LinkedIn link
+                    position, 
+                    email_address, 
+                    url      
                 FROM contacts
                 WHERE company IN ({placeholders}) 
                 ORDER BY last_name, first_name;
             """
             
-            # Pass the tuple of raw_names as the parameters
-            # This is the point where the parameters are safely injected by psycopg2
             cur.execute(sql_contacts, tuple(final_raw_names))
             
-            contacts = [dict(row) for row in cur.fetchall()]
+            # Map the database field names to the keys expected by management.js
+            contacts = []
+            for row in cur.fetchall():
+                contacts.append({
+                    "first_name": row['first_name'],
+                    "last_name": row['last_name'],
+                    "job_title": row['position'],         # Map position to job_title
+                    "email": row['email_address'],        # Map email_address to email
+                    "linkedin_url": row['url']            # Map url to linkedin_url
+                })
         
         # Return the combined data
         return jsonify({

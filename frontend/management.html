@@ -1,272 +1,250 @@
+<!-- 
+    Filename: management.html
+    Last Edited: 2025-10-24
+    Purpose: Interface for managing and enriching standardized company profiles.
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Company Management Tool</title>
-<style>
-        body { font-family: 'Inter', sans-serif; max-width: 1200px; margin: 20px auto; display: flex; gap: 20px; flex-direction: column; background-color: #f4f7f9; }
-        
-        /* Nav Styling */
-        nav {
-            margin-bottom: 20px; 
-            padding-bottom: 10px; 
-            border-bottom: 2px solid #0056b3; /* Darker blue line */
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary': '#4f46e5', // indigo-600
+                    }
+                }
+            }
         }
-        nav a {
-            font-weight: bold; 
-            color: #007bff; 
-            text-decoration: none; 
-            font-size: 1.1em;
-            padding: 5px 10px;
-            border-radius: 4px;
-            transition: background-color 0.2s;
+    </script>
+    <style>
+        /* Custom styles for the active state and general look */
+        .company-name-link.active {
+            background-color: #eef2ff; /* indigo-50 */
+            border-left: 4px solid #4f46e5; /* indigo-600 */
+            font-weight: 600;
         }
-        nav a:hover {
-            background-color: #e6f0ff; /* Light blue hover */
+        /* Adjusted height to account for the new header and nav bar */
+        .container-height {
+            height: calc(100vh - 8rem); 
         }
-        
-        /* Main content container for three panels */
-        .content-container {
-            display: flex;
-            gap: 20px;
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-            padding: 20px;
+        input[type="checkbox"]:checked {
+            background-color: #4f46e5;
+            border-color: #4f46e5;
         }
-
-        /* 1. List Panel (Sidebar) */
-        .list-panel { 
-            width: 250px; 
-            flex-shrink: 0; 
-            border-right: 1px solid #dee2e6; /* Light gray separator */
-            padding-right: 20px; 
-            overflow-y: auto; /* Scrollable list */
-            max-height: 80vh;
-        }
-        
-        .company-item { 
-            padding: 10px; 
-            cursor: pointer; 
-            border-radius: 6px;
-            margin-bottom: 4px;
-            transition: background-color 0.15s, box-shadow 0.15s;
-        }
-        .company-item:hover { 
-            background-color: #f8f9fa; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .company-item.selected { 
-            background-color: #007bff; 
-            color: white; 
-            font-weight: bold; 
-        }
-
-        /* 2. Detail Panel (Form) */
-        .detail-panel { 
-            width: 450px;
-            flex-shrink: 0; 
-        }
-        
-        label { 
-            font-weight: 600; 
-            margin-top: 15px; 
-            margin-bottom: 5px; 
-            display: block;
-            color: #343a40;
-        }
-        
-        input:not([type="checkbox"]), textarea, select { 
-            width: 100%; 
-            padding: 10px; 
-            margin-bottom: 10px; 
-            border: 1px solid #ced4da;
-            border-radius: 4px; 
-            box-sizing: border-box; /* Include padding in width */
-        }
-        textarea {
-            resize: vertical;
-            min-height: 100px;
-        }
-
-        .form-row {
-            display: flex;
-            gap: 20px;
-        }
-        .form-row > div {
-            flex: 1;
-        }
-
-        .revenue-group {
-            display: flex;
-            gap: 10px;
-        }
-        .revenue-group input {
-            flex-grow: 1;
-        }
-        .revenue-group select {
-            width: 120px;
-            flex-shrink: 0;
-        }
-
-        button {
-            background-color: #28a745;
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-top: 20px;
-            font-size: 1em;
-            transition: background-color 0.2s;
-        }
-        button:hover {
-            background-color: #218838;
-        }
-
-        /* Message Display */
-        .message {
-            padding: 10px;
-            margin-bottom: 15px;
-            border-radius: 4px;
-            font-weight: bold;
-            display: none;
-        }
-        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .message { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
-        
-        /* 3. Related Data Panel */
-        .related-data-panel {
-            flex-grow: 1;
-            padding-left: 20px;
-            border-left: 1px solid #dee2e6;
-        }
-        
-        .related-list-title {
-            margin-top: 25px;
-            margin-bottom: 10px;
-            color: #007bff;
-            border-bottom: 1px dashed #d1e7ff;
-            padding-bottom: 5px;
-        }
-        
-        .raw-name-item {
-            background-color: #f0f8ff;
-            padding: 5px 8px;
-            border-radius: 4px;
-            margin-bottom: 4px;
-            font-size: 0.9em;
-        }
-
-        .no-data, .loading-message, .error-message {
-            color: #6c757d;
-            padding: 10px 0;
-            font-style: italic;
-        }
-        
-        /* --- NEW CONTACT STYLES --- */
-        .contact-item {
-            margin-bottom: 8px;
-            padding: 5px;
-            border-bottom: 1px dotted #e9ecef;
-        }
-        .contact-link {
-            font-weight: bold;
-            color: #007bff; /* Primary link color */
-            text-decoration: none;
-            transition: color 0.15s;
-        }
-        .contact-link:hover {
-            color: #0056b3;
-            text-decoration: underline;
-        }
-        .contact-name {
-            font-weight: bold;
-        }
-        .contact-position {
-            color: #6c757d; /* Muted color for the title */
-            font-size: 0.95em;
-        }
-        /* --- END NEW CONTACT STYLES --- */
-        
-</style>
+    </style>
 </head>
-<body>
-    <nav>
-        <a href="company_list.html">All Companies</a> | 
-        <a href="management.html">Management Tool</a> |
-        <a href="mapping.html">Raw Name Mapping</a>
-    </nav>
+<body class="bg-gray-50 font-sans antialiased">
 
-    <h1>Company Management Tool</h1>
-    <div id="messageDisplay" class="message"></div>
-
-    <div class="content-container">
-        <!-- LEFT COLUMN: Company List -->
-        <div class="list-panel">
-            <h2>Clean Companies</h2>
-            <div id="companyList">Loading companies...</div>
-        </div>
-
-        <!-- CENTER COLUMN: Company Detail Form -->
-        <div class="detail-panel">
-            <h2>Company Profile</h2>
-            <form id="companyDetailForm" style="display: none;">
-                <label for="companyNameClean">Clean Company Name:</label>
-                <input type="text" id="companyNameClean" required>
+    <!-- Global Navigation Bar -->
+    <nav class="bg-white shadow-lg sticky top-0 z-10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <!-- App Title/Branding -->
+                <div class="flex items-center">
+                    <span class="text-xl font-bold text-gray-900">Contact Data Manager</span>
+                </div>
                 
-                <div class="form-row">
-                    <div>
-                        <label for="sizeEmployees">Size (Employees):</label>
-                        <input type="number" id="sizeEmployees" placeholder="e.g., 500">
-                    </div>
-                    <div>
-                        <label for="targetInterest">Target Interest:</label>
-                        <select id="targetInterest">
-                            <option value="false">No</option>
-                            <option value="true">Yes</option>
+                <!-- Navigation Links -->
+                <div class="flex items-center space-x-4">
+                    <a href="index.html" class="text-gray-500 hover:text-gray-900 px-3 py-2 rounded-lg text-sm font-medium transition-colors">
+                        Raw Name Cleanup
+                    </a>
+                    <a href="management.html" class="text-white bg-primary px-3 py-2 rounded-lg text-sm font-medium" aria-current="page">
+                        Company Management
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    
+    <!-- Header (Specific to Management Page) -->
+    <header class="bg-white shadow-md border-b border-gray-100">
+        <div class="max-w-7xl mx-auto py-3 px-4 sm:px-6 lg:px-8">
+            <h1 class="text-xl font-bold text-gray-900">Company Profile Management</h1>
+            <p class="text-sm text-gray-500">View and enrich standardized company data.</p>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 container-height">
+        
+        <!-- Status Message Area -->
+        <div id="statusMessage" class="hidden p-3 rounded-lg mb-6 font-medium" role="alert"></div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 container-height">
+            
+            <!-- Left Panel: Company List & Filters (1/3 width) -->
+            <div id="companyListContainer" class="col-span-1 bg-white shadow-xl rounded-xl flex flex-col overflow-hidden">
+                <div class="p-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-2">Standardized Companies</h2>
+                    <div class="flex flex-col space-y-2">
+                        <!-- Search Filter -->
+                        <input type="text" id="searchFilter" placeholder="Search by name, HQ, or notes..." 
+                               class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                        
+                        <!-- Target Interest Filter -->
+                        <select id="targetFilter" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary bg-white">
+                            <option value="all">Target Interest: All</option>
+                            <option value="true">Target: Yes</option>
+                            <option value="false">Target: No</option>
                         </select>
                     </div>
                 </div>
 
-                <label for="annualRevenue">Annual Revenue:</label>
-                <div class="revenue-group">
-                    <input type="number" id="annualRevenue" placeholder="e.g., 5.2">
-                    <select id="revenueScale">
-                        <option value="">Unit</option>
-                        <option value="K">Thousand</option>
-                        <option value="M">Million</option>
-                        <option value="B">Billion</option>
-                    </select>
+                <!-- Company List Area -->
+                <div id="companyList" class="flex-grow overflow-y-auto divide-y divide-gray-100">
+                    <!-- List items will be injected here by management.js -->
+                </div>
+            </div>
+
+            <!-- Right Panel: Profile Details & Form (2/3 width) -->
+            <div class="md:col-span-2 bg-white shadow-xl rounded-xl p-6 flex flex-col overflow-hidden">
+                
+                <!-- Initial Welcome Message -->
+                <div id="initialMessage" class="flex flex-col items-center justify-center h-full text-center py-20">
+                    <svg class="w-12 h-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                    <p class="text-xl font-semibold text-gray-700 mb-2">Select a Company to Manage</p>
+                    <p class="text-gray-500">Click on a company name in the list to the left to view and edit its profile details.</p>
                 </div>
 
-                <label for="headquarters">Headquarters:</label>
-                <input type="text" id="headquarters" placeholder="e.g., New York, NY">
+                <!-- Profile Container (Hidden until a company is loaded) -->
+                <div id="profileContainer" class="hidden h-full flex flex-col">
+                    <h2 id="companyTitle" class="text-2xl font-bold text-gray-900 mb-6">Company Profile Data</h2>
+                    
+                    <div class="flex-grow overflow-y-auto pr-2">
 
-                <label for="notes">Notes:</label>
-                <textarea id="notes" placeholder="Free-form research notes"></textarea>
+                        <form id="companyForm" class="space-y-6">
 
-                <button type="button" onclick="saveChanges()">Save Changes</button>
-            </form>
+                            <!-- Section: Core Data -->
+                            <div class="border border-gray-200 p-4 rounded-lg">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Core Profile</h3>
+
+                                <div>
+                                    <label for="company_name_clean" class="block text-sm font-medium text-gray-700">Clean Company Name (Mandatory)</label>
+                                    <input type="text" id="company_name_clean" name="company_name_clean" required
+                                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-primary focus:border-primary">
+                                </div>
+                                
+                                <div>
+                                    <label for="headquarters" class="block text-sm font-medium text-gray-700">Headquarters Location</label>
+                                    <input type="text" id="headquarters" name="headquarters"
+                                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-primary focus:border-primary">
+                                </div>
+
+                                <div class="flex items-center pt-4">
+                                    <input id="target_interest" name="target_interest" type="checkbox"
+                                           class="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary">
+                                    <label for="target_interest" class="ml-3 block text-base font-medium text-gray-900">
+                                        Target Interest (High Priority)
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Section: Financial and Size Data -->
+                            <div class="border border-gray-200 p-4 rounded-lg">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Enrichment Data</h3>
+                                
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    
+                                    <div>
+                                        <label for="size_employees" class="block text-sm font-medium text-gray-700">Employees (Size)</label>
+                                        <input type="number" id="size_employees" name="size_employees" min="0"
+                                               class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-primary focus:border-primary">
+                                    </div>
+                                    
+                                    <div class="col-span-2 grid grid-cols-3 gap-2">
+                                        <div class="col-span-2">
+                                            <label for="annual_revenue" class="block text-sm font-medium text-gray-700">Annual Revenue (Value)</label>
+                                            <input type="number" id="annual_revenue" name="annual_revenue" step="0.01" min="0"
+                                                   class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-primary focus:border-primary">
+                                        </div>
+                                        <div>
+                                            <label for="revenue_scale" class="block text-sm font-medium text-gray-700">Scale</label>
+                                            <select id="revenue_scale" name="revenue_scale"
+                                                    class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-primary focus:border-primary bg-white">
+                                                <option value="">Select...</option>
+                                                <option value="M">Million (M)</option>
+                                                <option value="B">Billion (B)</option>
+                                                <option value="T">Trillion (T)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Section: Notes -->
+                            <div class="border border-gray-200 p-4 rounded-lg">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Internal Notes</h3>
+                                <div>
+                                    <label for="notes" class="block text-sm font-medium text-gray-700">Notes / Internal Context</label>
+                                    <textarea id="notes" name="notes" rows="3"
+                                              class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-primary focus:border-primary"></textarea>
+                                </div>
+                            </div>
+                            
+                            <!-- Section: Linked Data (Raw Names) -->
+                            <div class="border border-gray-200 p-4 rounded-lg">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Mapped Raw Names</h3>
+                                <div id="rawNamesList" class="flex flex-wrap gap-2 pt-2 min-h-[50px]">
+                                    <!-- Raw names will be injected here by management.js -->
+                                </div>
+                            </div>
+
+                            <!-- Section: Linked Contacts -->
+                            <div class="border border-gray-200 p-4 rounded-lg">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2 flex justify-between items-center">
+                                    <span>Linked Contacts</span>
+                                    <span class="text-sm font-normal text-primary">Total: <span id="contactCount">0</span></span>
+                                </h3>
+                                
+                                <div class="overflow-x-auto">
+                                    <table class="min-w-full divide-y divide-gray-200">
+                                        <thead class="bg-gray-50">
+                                            <tr>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Contact Name / LinkedIn
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Job Title
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Email
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="contactsTableBody" class="bg-white divide-y divide-gray-200">
+                                            <!-- Contact rows will be injected here by management.js -->
+                                            <tr><td colspan="3" class="text-center py-4 text-gray-500 italic">Select a company to load contacts.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Submit Button -->
+                            <div class="sticky bottom-0 bg-white p-4 -mx-6 border-t border-gray-200 mt-6 shadow-t-lg">
+                                <button type="submit" id="saveBtn"
+                                        class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-lg text-lg font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </form>
+                    </div> <!-- End of overflow area -->
+                </div> <!-- End of profileContainer -->
+
+            </div> <!-- End of Right Panel -->
         </div>
-        
-        <!-- RIGHT COLUMN: RELATED DATA -->
-        <div class="related-data-panel">
-            <h2 id="relatedHeader">Related Contacts and Names</h2>
-            
-            <h3 class="related-list-title">Linked Raw Company Names:</h3>
-            <div id="rawNamesList">Select a company to load names.</div>
-
-            <h3 class="related-list-title">Linked Contacts:</h3>
-            <div id="contactsList">Select a company to load contacts.</div>
-        </div>
-        <!-- END RELATED DATA COLUMN -->
-
-    </div>
+    </main>
     
-    <!-- IMPORTANT: management.js must be in the same directory for this to work -->
+    <!-- Load JavaScript logic -->
     <script src="management.js"></script>
 
 </body>
