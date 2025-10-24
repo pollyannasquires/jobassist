@@ -17,6 +17,7 @@ async function loadCompanyList() {
     listDiv.innerHTML = 'Fetching list...';
 
     try {
+        // Fetch all companies (without specific filters for management list)
         const response = await fetch(`${API_BASE}/companies`);
         const data = await response.json();
 
@@ -39,87 +40,116 @@ async function loadCompanyList() {
         listDiv.innerHTML = `Error loading list: ${error.message}`;
     }
 }
+
 // ----------------------------------------------------------------------
-// 2. LOAD DETAILS FOR SELECTED COMPANY
+// 2. SELECT COMPANY AND LOAD PROFILE
 // ----------------------------------------------------------------------
-async function selectCompany(id, element) {
-    currentCompanyId = id;
-    document.querySelectorAll('.company-item').forEach(item => item.classList.remove('selected'));
+async function selectCompany(companyId, element) {
+    // 1. Highlight the selected item in the list
+    document.querySelectorAll('.company-item').forEach(item => {
+        item.classList.remove('selected');
+    });
     element.classList.add('selected');
 
-    document.getElementById('detailTitle').textContent = `Loading Details for ID ${id}...`;
-    document.getElementById('companyForm').style.display = 'none';
-    document.getElementById('messageDisplay').style.display = 'none';
+    currentCompanyId = companyId;
+    document.getElementById('companyDetailForm').style.display = 'none';
+    document.getElementById('relatedHeader').textContent = 'Loading...';
+    
+    displayMessage('message', 'Loading company details...');
 
     try {
-        const response = await fetch(`${API_BASE}/companies/${id}`);
-        const company = await response.json();
+        // Fetch Company Profile
+        const profileResponse = await fetch(`${API_BASE}/companies/${companyId}`);
+        const profileData = await profileResponse.json();
 
-        if (response.ok) {
-            document.getElementById('detailTitle').textContent = `Editing: ${company.company_name_clean}`;
-            
-            // --- RENDER MAPPED RAW NAMES ---
-            const mappedList = document.getElementById('mappedNamesList');
-            mappedList.innerHTML = ''; // Clear previous list
-
-            if (company.mapped_names && company.mapped_names.length > 0) {
-                company.mapped_names.forEach(name => {
-                    const listItem = document.createElement('li');
-                    listItem.textContent = name;
-                    mappedList.appendChild(listItem);
-                });
-            } else {
-                mappedList.innerHTML = '<li>No raw names mapped yet.</li>';
-            }
-            
-            // --- RENDER ASSOCIATED CONTACTS ---
-            const contactList = document.getElementById('contactList');
-            contactList.innerHTML = ''; // Clear previous list
-
-            if (company.contacts && company.contacts.length > 0) {
-                company.contacts.forEach(person => {
-                    const listItem = document.createElement('li');
-                    
-                    let name = `${person.first_name || ''} ${person.last_name || ''}`.trim();
-
-                    if (person.linkedin_url) {
-                        const link = document.createElement('a');
-                        link.href = person.linkedin_url;
-                        link.target = '_blank'; // Open in new tab
-                        link.textContent = name;
-                        listItem.appendChild(link);
-                    } else {
-                        listItem.textContent = name;
-                    }
-                    
-                    contactList.appendChild(listItem);
-                });
-            } else {
-                contactList.innerHTML = '<li>No contacts found linked to this company\'s raw names.</li>';
-            }
-            
-            // --- POPULATE FORM FIELDS ---
-            document.getElementById('companyNameClean').value = company.company_name_clean || '';
-            document.getElementById('targetInterest').value = String(company.target_interest);
-            document.getElementById('sizeEmployees').value = company.size_employees || '';
-            document.getElementById('annualRevenue').value = company.annual_revenue || '';
-            document.getElementById('revenueScale').value = company.revenue_scale || '';
-            document.getElementById('headquarters').value = company.headquarters || '';
-            document.getElementById('notes').value = company.notes || '';
-
-            document.getElementById('companyForm').style.display = 'block';
-
+        if (profileResponse.ok && profileData.company) {
+            fillForm(profileData.company);
+            document.getElementById('companyDetailForm').style.display = 'block';
+            displayMessage('success', 'Profile loaded.');
         } else {
-            document.getElementById('detailTitle').textContent = 'Error loading details.';
-            displayMessage('error', company.message);
+            displayMessage('error', profileData.message || 'Failed to load profile.');
         }
+
+        // Fetch Related Data (Raw Names and Contacts)
+        await displayRelatedData(companyId);
+
     } catch (error) {
-        document.getElementById('detailTitle').textContent = 'Connection Error.';
-        displayMessage('error', `Network error: ${error.message}`);
+        displayMessage('error', 'Network error during load: ' + error.message);
     }
 }
+
 // ----------------------------------------------------------------------
-// 3. SAVE CHANGES (PUT request)
+// 3. FILL FORM WITH COMPANY DATA
+// ----------------------------------------------------------------------
+function fillForm(company) {
+    document.getElementById('companyNameClean').value = company.company_name_clean || '';
+    document.getElementById('targetInterest').value = company.target_interest ? 'true' : 'false';
+    document.getElementById('sizeEmployees').value = company.size_employees || '';
+    document.getElementById('annualRevenue').value = company.annual_revenue || '';
+    document.getElementById('revenueScale').value = company.revenue_scale || '';
+    document.getElementById('headquarters').value = company.headquarters || '';
+    document.getElementById('notes').value = company.notes || '';
+}
+
+// ----------------------------------------------------------------------
+// 4. DISPLAY RELATED DATA (Raw Names & Contacts)
+// ----------------------------------------------------------------------
+async function displayRelatedData(companyId) {
+    const rawNamesDiv = document.getElementById('rawNamesList');
+    const contactsDiv = document.getElementById('contactsList');
+    
+    rawNamesDiv.innerHTML = '<div class="loading-message">Loading raw names...</div>';
+    contactsDiv.innerHTML = '<div class="loading-message">Loading contacts...</div>';
+    document.getElementById('relatedHeader').textContent = 'Related Contacts and Names';
+
+    try {
+        const response = await fetch(`${API_BASE}/companies/${companyId}/related_data`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            rawNamesDiv.innerHTML = `<div class="error-message">Error: ${data.message}</div>`;
+            contactsDiv.innerHTML = `<div class="error-message">Error: ${data.message}</div>`;
+            return;
+        }
+
+        // Display Raw Names
+        if (data.raw_names && data.raw_names.length > 0) {
+            rawNamesDiv.innerHTML = data.raw_names.map(name => 
+                `<div class="raw-name-item">${name}</div>`
+            ).join('');
+        } else {
+            rawNamesDiv.innerHTML = '<div class="no-data">No raw names linked.</div>';
+        }
+
+        // Display Contacts (Now with clickable URL)
+        if (data.contacts && data.contacts.length > 0) {
+            contactsDiv.innerHTML = data.contacts.map(c => {
+                const fullName = `${c.first_name || ''} ${c.last_name || ''}`.trim();
+                let nameHtml;
+                
+                // Use URL for a clickable link
+                if (c.url && c.url.startsWith('http')) {
+                    nameHtml = `<a href="${c.url}" target="_blank" rel="noopener noreferrer" class="contact-link">${fullName}</a>`;
+                } else {
+                    nameHtml = `<span class="contact-name">${fullName}</span>`;
+                }
+
+                // Combine name and position/title
+                return `<div class="contact-item">${nameHtml} <span class="contact-position">(${c.position || 'N/A'})</span></div>`;
+            }).join('');
+        } else {
+            contactsDiv.innerHTML = '<div class="no-data">No linked contacts found.</div>';
+        }
+
+    } catch (error) {
+        rawNamesDiv.innerHTML = `<div class="error-message">Network Error</div>`;
+        contactsDiv.innerHTML = `<div class="error-message">Network Error</div>`;
+        console.error("Error loading related data:", error);
+    }
+}
+
+// ----------------------------------------------------------------------
+// 5. SAVE CHANGES
 // ----------------------------------------------------------------------
 async function saveChanges() {
     if (!currentCompanyId) return;
@@ -128,7 +158,9 @@ async function saveChanges() {
 
     const payload = {
         company_name_clean: document.getElementById('companyNameClean').value,
-        target_interest: document.getElementById('targetInterest').value === 'true',
+        // Convert 'true'/'false' string back to boolean for the backend
+        target_interest: document.getElementById('targetInterest').value === 'true', 
+        // Parse numbers, default to null if empty/invalid
         size_employees: parseInt(document.getElementById('sizeEmployees').value) || null,
         annual_revenue: parseFloat(document.getElementById('annualRevenue').value) || null,
         revenue_scale: document.getElementById('revenueScale').value,

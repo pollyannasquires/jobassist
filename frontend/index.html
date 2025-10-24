@@ -2,185 +2,113 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Company Cleanup & Mapping</title>
+    <title>Company List (Filtered View)</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            max-width: 1200px; 
+            font-family: 'Inter', Arial, sans-serif;
+            max-width: 1200px; /* Increased max-width for better table view */
             margin: 20px auto;
-            display: flex; 
-            gap: 30px; 
-            flex-wrap: wrap; /* Allows nav to wrap above panels */
-        }
-        nav {
-            width: 100%;
-            margin-bottom: 20px; 
-            padding-bottom: 10px; 
-            border-bottom: 2px solid #007bff; 
-        }
-        .list-panel { 
-            width: 300px; 
-            border-right: 1px solid #ddd; 
-            padding-right: 20px; 
-            overflow-y: auto; 
-            max-height: 85vh; 
-        }
-        .detail-panel { 
-            flex-grow: 1; 
-            padding-left: 10px;
-        }
-
-        /* List Styling */
-        .raw-name-item { 
-            padding: 8px; 
-            cursor: pointer; 
-            border-bottom: 1px dashed #eee; 
-            overflow: hidden; 
-            text-overflow: ellipsis; 
-            white-space: nowrap;
-        }
-        .raw-name-item:hover, .raw-name-item.selected { 
-            background-color: #e6f7ff; 
-            font-weight: bold; 
-        }
-
-        h1 { color: #007bff; margin-top: 0; }
-        
-        #rawNameDisplay {
-            font-size: 1.5em;
-            font-weight: bold;
-            margin: 20px 0;
-            padding: 15px;
-            border: 2px solid #007bff;
-            border-radius: 6px;
-            text-align: center;
-            background-color: #f8faff;
-        }
-        
-        /* Input & Form Styling */
-        label { display: block; margin-top: 15px; font-weight: bold; }
-        input[type="text"], input[type="number"], select {
-            width: 100%;
-            padding: 10px;
-            margin-top: 5px;
-            box-sizing: border-box;
-            border: 1px solid #aaa;
-            border-radius: 4px;
-        }
-        
-        .action-panel {
-            margin-top: 25px;
             padding: 20px;
+            background-color: #f4f7f9;
+        }
+
+        h1 { color: #1e3a8a; border-bottom: 2px solid #d1d5db; padding-bottom: 10px; margin-bottom: 20px; }
+
+        nav {
+            margin-bottom: 25px;
+            display: flex;
+            gap: 15px;
+        }
+        nav a {
+            text-decoration: none;
+            padding: 8px 15px;
             border-radius: 6px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+            background-color: #eff6ff;
+            color: #1e3a8a;
+            border: 1px solid #bfdbfe;
+        }
+        nav a:hover {
+            background-color: #bfdbfe;
+            color: #1e3a8a;
         }
 
-        #mapToExistingPanel { border: 1px solid #28a745; background-color: #f1fff5; }
-        #createNewPanel { border: 1px solid #ffc107; background-color: #fff9e6; }
-        
-        .button-group { margin-top: 15px; display: flex; gap: 10px; }
-        .button-group button {
-            padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; flex-grow: 1;
+        .filter-bar {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            margin-bottom: 30px;
+            display: flex;
+            gap: 20px;
+            align-items: flex-end;
         }
-        
-        #mapExistingButton { background-color: #28a745; color: white; }
-        #createNewButton { background-color: #ffc107; color: #333; }
-        #skipButton { background-color: #6c757d; color: white; margin-top: 20px; width: 100%; }
 
-        #batchActionButton {
-            background-color: #dc3545; /* Red for batch operation */
-            color: white;
+        .filter-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #4b5563;
+        }
+
+        .filter-group select, .filter-group input {
             padding: 10px;
-            border: none;
+            border: 1px solid #d1d5db;
             border-radius: 4px;
-            cursor: pointer;
-            width: 100%;
-            font-weight: bold;
-            margin-bottom: 15px;
-            /* This is the key line: it's hidden in the HTML, and shown by JS once the list loads */
-            display: none; 
-        }
-        #batchActionButton:hover {
-            background-color: #c82333;
+            min-width: 150px;
         }
 
-        .message { padding: 10px; margin-top: 15px; border-radius: 4px; text-align: center; }
-        .message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        /* --- New/Updated Styles for Table View --- */
+        .table-container {
+            /* This class is set by company_list.js when data is loaded */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            overflow: hidden; /* Ensures table corners are rounded */
+        }
+        
+        .loading-message { 
+            text-align: center; 
+            color: #6b7280; 
+            padding: 40px; 
+        }
+
+        /* Ensure table content is legible */
+        table {
+            border-collapse: collapse;
+            font-size: 0.95em;
+        }
+        
     </style>
 </head>
 <body>
     <nav>
-        <a href="management.html" style="font-weight: bold; color: #007bff; text-decoration: none; font-size: 1.1em;">
-            Go to Company Management &gt;&gt;
-        </a>
+        <a href="cleanup.html">Go to Company Cleanup Page</a>
+        <a href="management.html">Go to Company Management Page</a>
     </nav>
     
-    <div class="list-panel">
-        <h2>Unmapped Raw Names</h2>
-        <!-- THE BUTTON CALLS THE JAVASCRIPT FUNCTION -->
-        <button id="batchActionButton" onclick="batchCreateAndMap()">
-            Batch Create & Map All to Target (YES)
-        </button>
-        <div id="unmappedList">Loading names...</div>
+    <h1>Company List & Profiles</h1>
+
+    <div class="filter-bar">
+        <div class="filter-group">
+            <label for="targetFilter">Target Interest:</label>
+            <select id="targetFilter" onchange="debouncedLoadCompanies()">
+                <option value="all">All</option>
+                <option value="true">Yes (Target)</option>
+                <option value="false">No (Not Target)</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="searchFilter">Search Name:</label>
+            <input type="text" id="searchFilter" oninput="debouncedLoadCompanies()" placeholder="Start typing name...">
+        </div>
+    </div>
+
+    <!-- The company list container now receives the full table structure -->
+    <div id="companyList" class="loading-message">
+        Loading company data...
     </div>
     
-    <div class="detail-panel">
-        <h1>Company Cleanup Interface</h1>
-        
-        <div id="messageDisplay" class="message" style="display:none;"></div>
-
-        <div id="rawNameDisplay">Select a company name from the list.</div>
-        
-        <!-- ============================================== -->
-        <!-- 1. MAP TO EXISTING PROFILE SECTION -->
-        <!-- ============================================== -->
-        <div id="mapToExistingPanel" class="action-panel" style="display: none;">
-            <h3>1. Map to Existing Company Profile</h3>
-            
-            <label for="existingCleanName">Search & Select Existing Clean Name:</label>
-            <input type="text" id="existingCleanName" list="existingCleanNameList" placeholder="Start typing the clean name...">
-            <datalist id="existingCleanNameList"></datalist>
-
-            <div class="button-group">
-                <button type="button" id="mapExistingButton" onclick="submitMapping('map')">
-                    Map Raw Name to Existing
-                </button>
-            </div>
-        </div>
-
-        <!-- ============================================== -->
-        <!-- 2. CREATE NEW PROFILE SECTION -->
-        <!-- ============================================== -->
-        <div id="createNewPanel" class="action-panel" style="display: none;">
-            <h3>2. Create & Map New Company Profile</h3>
-
-            <label for="newCleanName">New Clean Name (Will be created):</label>
-            <input type="text" id="newCleanName" placeholder="Enter the exact name for the new profile">
-
-            <div class="button-group">
-                <button type="button" id="createNewButton" onclick="submitMapping('create')">
-                    Create New Profile & Map
-                </button>
-            </div>
-        </div>
-        
-        <!-- ============================================== -->
-        <!-- 3. SKIP ACTION -->
-        <!-- ============================================== -->
-        <button type="button" id="skipButton" onclick="submitMapping('skip')">
-            Skip & Map Raw Name to Itself
-        </button>
-        
-    </div>
-
-    <script src="app.js"></script>
+    <script src="company_list.js"></script>
 </body>
 </html>
-```
-
-The key piece that connects the HTML button to the JavaScript function is the **`onclick`** attribute:
-
-```html
-<button id="batchActionButton" onclick="batchCreateAndMap()">
-    Batch Create & Map All to Target (YES)
-</button>

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raw Name Mapping Tool</title>
+<style>
+    /* Global Styles */
+    body { font-family: 'Inter', sans-serif; max-width: 1200px; margin: 20px auto; display: flex; gap: 20px; flex-direction: column; background-color: #f4f7f9; }
+    
+    /* Nav Styling (Reused from management.html) */
+    nav {
+        margin-bottom: 20px; 
+        padding-bottom: 10px; 
+        border-bottom: 2px solid #0056b3;
+    }
+    nav a {
+        font-weight: bold; 
+        color: #007bff; 
+        text-decoration: none; 
+        font-size: 1.1em;
+        padding: 5px 10px;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+    nav a:hover {
+        background-color: #e6f0ff;
+    }
+    
+    /* Main Layout */
+    .content-container {
+        display: flex;
+        gap: 20px;
+        background-color: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        padding: 20px;
+        min-height: 70vh; /* Ensure some vertical space */
+    }
+
+    /* Left Panel: Unmapped List */
+    .list-panel { 
+        width: 40%; 
+        flex-shrink: 0; 
+        border-right: 1px solid #dee2e6;
+        padding-right: 20px; 
+        overflow-y: auto;
+        max-height: 80vh;
+    }
+    
+    /* Right Panel: Mapping Actions */
+    .action-panel { 
+        width: 60%;
+        flex-grow: 1; 
+    }
+    
+    /* Company Name Items */
+    .raw-name-item { 
+        padding: 10px; 
+        cursor: pointer; 
+        border-radius: 6px;
+        margin-bottom: 4px;
+        border: 1px solid #e9ecef;
+        background-color: #ffffff;
+        transition: background-color 0.15s, box-shadow 0.15s;
+    }
+    .raw-name-item:hover { 
+        background-color: #f0f8ff; 
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .raw-name-item.selected { 
+        background-color: #007bff; 
+        color: white; 
+        font-weight: bold; 
+        border-color: #007bff;
+    }
+
+    /* Action Containers */
+    .action-box {
+        border: 1px solid #ced4da;
+        border-radius: 6px;
+        padding: 15px;
+        margin-bottom: 20px;
+        background-color: #f8f9fa;
+    }
+    
+    /* Form Elements */
+    input[type="text"] { 
+        width: 100%; 
+        padding: 10px; 
+        margin-top: 5px; 
+        margin-bottom: 15px; 
+        border: 1px solid #ced4da;
+        border-radius: 4px; 
+        box-sizing: border-box;
+    }
+    
+    /* Buttons */
+    .btn-group {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
+    }
+    button {
+        padding: 10px 15px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 1em;
+        transition: background-color 0.2s;
+    }
+    
+    #mapExistingButton { background-color: #007bff; color: white; }
+    #mapExistingButton:hover { background-color: #0056b3; }
+    
+    #createNewButton { background-color: #28a745; color: white; }
+    #createNewButton:hover { background-color: #218838; }
+
+    #skipButton { background-color: #6c757d; color: white; }
+    #skipButton:hover { background-color: #5a6268; }
+
+    #batchActionButton { 
+        background-color: #ffc107; 
+        color: #343a40; 
+        font-weight: bold;
+        display: none; /* Controlled by JS */
+    }
+    #batchActionButton:hover { background-color: #e0a800; }
+    
+    /* Message Display */
+    .message {
+        padding: 10px;
+        margin-bottom: 15px;
+        border-radius: 4px;
+        font-weight: bold;
+        display: none;
+    }
+    .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .message { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+
+    /* Display for Selected Raw Name */
+    #rawNameDisplay {
+        font-size: 1.5em;
+        font-weight: 700;
+        margin-bottom: 20px;
+        color: #dc3545; /* Highlighting the raw, messy input */
+        padding-bottom: 10px;
+        border-bottom: 1px dashed #dc3545;
+    }
+
+</style>
+</head>
+<body>
+    <nav>
+        <a href="company_list.html">All Companies</a> | 
+        <a href="management.html">Management Tool</a> |
+        <a href="mapping.html">Raw Name Mapping</a>
+    </nav>
+
+    <h1>Raw Company Name Cleanup & Mapping</h1>
+    <div id="messageDisplay" class="message"></div>
+
+    <div class="content-container">
+        <!-- LEFT COLUMN: UNMAPPED LIST -->
+        <div class="list-panel">
+            <h2>Unmapped Raw Names</h2>
+            <button type="button" id="batchActionButton" onclick="batchCreateAndMap()">
+                Batch Map All Remaining Names
+            </button>
+            <div id="unmappedList">Loading unmapped names...</div>
+        </div>
+
+        <!-- RIGHT COLUMN: MAPPING ACTIONS -->
+        <div class="action-panel">
+            <h2>Mapping Actions</h2>
+            <div id="rawNameDisplay">Select a company name from the list to begin mapping.</div>
+
+            <!-- 1. MAP TO EXISTING CLEAN COMPANY -->
+            <div id="mapToExistingPanel" class="action-box" style="display: none;">
+                <h3>1. Map to Existing Profile</h3>
+                <p>Link the raw name to a standardized company profile.</p>
+                <label for="existingCleanName">Search for Clean Name:</label>
+                <input type="text" id="existingCleanName" list="existingCleanNameList" placeholder="e.g., Google" required>
+                <datalist id="existingCleanNameList"></datalist>
+                <div class="btn-group">
+                    <button type="button" id="mapExistingButton" onclick="submitMapping('map')">
+                        Map & Standardize
+                    </button>
+                    <button type="button" id="skipButton" onclick="submitMapping('skip')">
+                        Skip for Now
+                    </button>
+                </div>
+            </div>
+
+            <!-- 2. CREATE NEW CLEAN COMPANY -->
+            <div id="createNewPanel" class="action-box" style="display: none;">
+                <h3>2. Create New Profile</h3>
+                <p>If this company does not yet exist in your clean database, create a new one.</p>
+                <label for="newCleanName">New Clean Name:</label>
+                <input type="text" id="newCleanName" placeholder="e.g., The New Company Name" required>
+                <button type="button" id="createNewButton" onclick="submitMapping('create')">
+                    Create New Profile & Map
+                </button>
+            </div>
+            
+        </div>
+    </div>
+    
+    <!-- IMPORTANT: app.js contains the logic for this page -->
+    <script src="app.js"></script>
+
+</body>
+</html>
