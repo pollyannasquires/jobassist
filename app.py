@@ -1,4 +1,4 @@
-// /home/jobert/webapp/contact_app/frontend/app.js (LIST-BASED MAPPING)
+// ~/webapp/contact_app/frontend/app.js (LIST-BASED MAPPING)
 const API_BASE = '/api';
 let currentRawName = null;
 
