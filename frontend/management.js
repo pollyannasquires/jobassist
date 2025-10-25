@@ -1,4 +1,4 @@
-// FILENAME: management.js | LAST EDITED: 2025-10-24
+// FILENAME: management.js | LAST EDITED: 2025-10-24 (Final Correction)
 
 const API_BASE = '/api/companies';
 
@@ -17,6 +17,7 @@ const searchFilter = document.getElementById('searchFilter');
 const targetFilter = document.getElementById('targetFilter');
 
 // Form field elements
+const companyIdInput = document.getElementById('company_id');
 const cleanNameInput = document.getElementById('company_name_clean');
 const headquartersInput = document.getElementById('headquarters');
 const employeesInput = document.getElementById('size_employees');
@@ -30,300 +31,371 @@ const saveBtn = document.getElementById('saveBtn');
 // Global state
 let allCompanies = [];
 let currentCompanyId = null;
+let currentActiveLink = null;
 
 // --- Utility Functions ---
 
-/** Displays a status message to the user. */
-function showStatus(message, type = 'success') {
+/**
+ * Shows a status message (success or error).
+ * @param {string} message 
+ * @param {('success'|'error')} type 
+ */
+function showStatus(message, type) {
     statusMessage.textContent = message;
-    // Set classes based on type
-    const baseClasses = 'p-3 rounded-lg mb-6 font-medium';
-    const typeClasses = type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+    statusMessage.classList.remove('bg-success', 'bg-error', 'hidden', 'opacity-0', 'translate-y-[-10px]');
     
-    statusMessage.className = `${baseClasses} ${typeClasses}`;
-    statusMessage.classList.remove('hidden');
+    if (type === 'success') {
+        statusMessage.classList.add('bg-success');
+    } else {
+        statusMessage.classList.add('bg-error');
+    }
+    
+    // Animate in
+    statusMessage.classList.add('opacity-100', 'translate-y-0');
 
-    // Hide after 5 seconds
-    setTimeout(() => statusMessage.classList.add('hidden'), 5000);
+    setTimeout(() => {
+        // Animate out
+        statusMessage.classList.remove('opacity-100', 'translate-y-0');
+        statusMessage.classList.add('opacity-0', 'translate-y-[-10px]');
+        
+        // Hide after animation
+        setTimeout(() => {
+            statusMessage.classList.add('hidden');
+        }, 300); 
+    }, 4000);
 }
 
-/** Clears the profile view and resets the form. */
-function clearProfile() {
+/**
+ * Creates a debounced function that delays execution.
+ * @param {Function} func The function to debounce.
+ * @param {number} delay The delay in milliseconds.
+ * @returns {Function} The debounced function.
+ */
+function debounce(func, delay) {
+    let timeoutId;
+    return function(...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+            func.apply(this, args);
+        }, delay);
+    };
+}
+
+/**
+ * Formats a number with commas.
+ * @param {number} num 
+ * @returns {string}
+ */
+function formatNumber(num) {
+    if (num === null || num === undefined) return '';
+    return num.toLocaleString();
+}
+
+/**
+ * Resets the profile form to initial state.
+ */
+function resetProfileView() {
+    companyForm.reset();
+    companyTitle.textContent = '';
+    rawNamesList.innerHTML = '<p class="text-sm text-gray-500 italic">Select a company to load raw names.</p>';
+    contactCountSpan.textContent = '0';
+    contactsTableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-gray-500 italic">Select a company to load contacts.</td></tr>';
     profileContainer.classList.add('hidden');
     initialMessage.classList.remove('hidden');
-    companyForm.reset();
-    companyTitle.textContent = 'Company Profile Data'; // Reset detail title
-    rawNamesList.innerHTML = '<p class="text-gray-500 italic text-sm">No names loaded.</p>';
-    contactCountSpan.textContent = '0';
-    // NOTE: Contacts table header might need adjustment in the HTML to match 3 columns
-    contactsTableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-gray-500 italic">No contacts loaded.</td></tr>'; 
-    currentCompanyId = null;
-    
-    // Deselect all company links
-    document.querySelectorAll('.company-name-link').forEach(el => el.classList.remove('active'));
 }
 
-// --- List Loading and Filtering ---
 
-/** Fetches all clean companies for the list view. */
-async function fetchAllCompanies() {
-    companyListElement.innerHTML = '<p class="text-center py-4 text-gray-500 italic">Fetching companies...</p>';
-    try {
-        // NOTE: Assuming /api/companies returns all clean company profiles
-        const response = await fetch(API_BASE);
-        const data = await response.json();
+// --- Rendering Functions ---
 
-        if (response.ok) {
-            allCompanies = data.companies || [];
-            renderCompanyList();
-        } else {
-            showStatus(`Error fetching company list: ${data.message || 'Server error'}`, 'error');
-            companyListElement.innerHTML = '<p class="p-4 text-center text-red-500 font-medium">Failed to load list.</p>';
-        }
-    } catch (error) {
-        console.error('Fetch error for all companies:', error);
-        showStatus('A network error occurred while loading the company list.', 'error');
-    }
-}
-
-/** Filters and renders the company list based on current filters. */
-function renderCompanyList() {
-    const searchTerm = searchFilter.value.toLowerCase();
-    const targetFilterValue = targetFilter.value;
-
-    const filteredCompanies = allCompanies.filter(company => {
-        // Name Search Filter
-        const nameMatch = company.company_name_clean.toLowerCase().includes(searchTerm);
-        
-        // Target Interest Filter
-        let targetMatch = true;
-        if (targetFilterValue !== 'all') {
-            // Note: target_interest from the API is a boolean, but filter value is a string.
-            // JSON from Python often returns booleans as true/false, which JavaScript handles correctly.
-            const isTarget = targetFilterValue === 'true'; 
-            targetMatch = company.target_interest === isTarget;
-        }
-
-        return nameMatch && targetMatch;
-    });
-
-    if (filteredCompanies.length === 0) {
-        companyListElement.innerHTML = `<p class="p-4 text-center text-gray-500 italic">No companies match your filters.</p>`;
+/**
+ * Renders the list of companies in the sidebar.
+ * @param {Array<Object>} companies 
+ */
+function renderCompanyList(companies) {
+    if (companies.length === 0) {
+        companyListElement.innerHTML = '<div class="p-4 text-center text-gray-500 italic">No companies found matching the filter criteria.</div>';
         return;
     }
 
-    companyListElement.innerHTML = filteredCompanies.map(company => `
-        <div 
-            class="company-name-link p-3 border-b border-gray-100 flex justify-between items-center cursor-pointer hover:bg-indigo-50 transition-colors" 
-            data-id="${company.company_id}"
-        >
-            <span class="truncate pr-2">${company.company_name_clean}</span>
-            <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${company.target_interest ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}">
-                ${company.target_interest ? 'TARGET' : 'No'}
-            </span>
-        </div>
+    const html = companies.map(c => `
+        <a href="#" class="company-name-link block p-4 hover:bg-gray-100 transition duration-150 ${c.company_id === currentCompanyId ? 'active' : ''}" 
+           data-id="${c.company_id}" 
+           data-target="${c.target_interest}">
+            <div class="flex items-center justify-between">
+                <span class="text-gray-800 font-medium">${c.company_name_clean}</span>
+                <i data-lucide="zap" 
+                   class="w-4 h-4 ${c.target_interest ? 'text-primary' : 'text-gray-300'}"
+                   title="${c.target_interest ? 'Target Interest' : 'Not Target'}">
+                </i>
+            </div>
+            <p class="text-sm text-gray-500 mt-0.5">Employees: ${c.size_employees ? formatNumber(c.size_employees) : 'N/A'}</p>
+        </a>
     `).join('');
 
-    // Re-highlight the currently loaded company if applicable
+    companyListElement.innerHTML = html;
+    // Re-initialize icons for the new content
+    lucide.createIcons();
+    
+    // Re-select the active link if one exists
     if (currentCompanyId) {
-        const activeLink = document.querySelector(`.company-name-link[data-id="${currentCompanyId}"]`);
-        if (activeLink) {
-            activeLink.classList.add('active');
+        currentActiveLink = document.querySelector(`.company-name-link[data-id="${currentCompanyId}"]`);
+        if (currentActiveLink) {
+            currentActiveLink.classList.add('active');
         }
     }
 }
 
-// Simple debounce function
-let debounceTimer;
-function debouncedLoadCompanies() {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(renderCompanyList, 300);
-}
+/**
+ * Renders the raw name list in the profile view.
+ * @param {Array<string>} rawNames 
+ */
+function renderRawNames(rawNames) {
+    rawNamesList.innerHTML = '';
+    document.getElementById('rawNamesCount').textContent = (rawNames && rawNames.length) || 0; 
 
-// --- Data Loading Functions ---
-
-/** Fetches the main company profile data and populates the form fields. */
-async function loadCompanyProfile(companyId, targetElement) {
-    if (currentCompanyId === companyId) return; // Already loaded
-
-    // 1. Update active selection in the list
-    document.querySelectorAll('.company-name-link').forEach(el => el.classList.remove('active'));
-    if (targetElement) {
-        targetElement.classList.add('active');
-    }
-
-    // Show loading state in the profile area
-    initialMessage.classList.add('hidden');
-    profileContainer.classList.add('opacity-50', 'pointer-events-none');
-    companyTitle.textContent = `Loading Company ID ${companyId}...`;
-    
-    currentCompanyId = companyId;
-
-    try {
-        const response = await fetch(`${API_BASE}/${companyId}`);
-        const data = await response.json();
-
-        if (response.ok) {
-            const company = data.company;
-            
-            // 2. Populate form fields
-            companyTitle.textContent = `${company.company_name_clean} (ID: ${company.company_id})`;
-            cleanNameInput.value = company.company_name_clean || '';
-            headquartersInput.value = company.headquarters || '';
-            
-            // Handle potential nulls from Python/PostgreSQL
-            employeesInput.value = company.size_employees !== null && company.size_employees > 0 ? company.size_employees : '';
-            revenueInput.value = company.annual_revenue !== null && company.annual_revenue > 0 ? company.annual_revenue : '';
-
-            revenueScaleSelect.value = company.revenue_scale || '';
-            targetInterestCheckbox.checked = company.target_interest === true;
-            notesTextarea.value = company.notes || '';
-
-            profileContainer.classList.remove('hidden');
-            
-            // 3. Load related data (contacts and raw names)
-            await loadRelatedData(companyId);
-            
-            showStatus(`Profile for ${company.company_name_clean} loaded.`, 'success');
-
-        } else if (response.status === 404) {
-            showStatus(`Error: Company ID ${companyId} not found.`, 'error');
-            clearProfile();
-        } else {
-            showStatus(`Error loading profile: ${data.message || 'Server error'}`, 'error');
-            clearProfile();
-        }
-
-    } catch (error) {
-        console.error('Fetch error for company profile:', error);
-        showStatus('A network error occurred while trying to load the profile.', 'error');
-        clearProfile();
-    } finally {
-        profileContainer.classList.remove('opacity-50', 'pointer-events-none');
-    }
-}
-
-/** Fetches the related raw names and contacts and populates the lists/tables. */
-async function loadRelatedData(companyId) {
-    // Set loading states
-    rawNamesList.innerHTML = '<p class="text-gray-500 italic text-sm">Loading linked names...</p>';
-    contactsTableBody.innerHTML = '<tr><td colspan="3" class="text-center text-gray-500 italic py-4">Loading contacts...</td></tr>';
-    contactCountSpan.textContent = '...';
-    
-    try {
-        // NOTE: Uses the new /api/companies/{company_id}/related_data endpoint
-        const response = await fetch(`${API_BASE}/${companyId}/related_data`); 
-        const data = await response.json();
-        
-        if (response.ok) {
-            // --- Raw Names ---
-            const rawNames = data.raw_names || [];
-            if (rawNames.length > 0) {
-                rawNamesList.innerHTML = rawNames.map(name => 
-                    `<span class="inline-block bg-indigo-100 text-indigo-700 text-xs px-3 py-1 rounded-full font-medium m-1">${name}</span>`
-                ).join('');
-            } else {
-                rawNamesList.innerHTML = '<p class="text-gray-500 italic text-sm">No raw names linked yet. Use the Cleanup Page to map this company.</p>';
-            }
-            
-            // --- Contacts ---
-            const contacts = data.contacts || [];
-            contactCountSpan.textContent = contacts.length;
-            
-            if (contacts.length > 0) {
-                contactsTableBody.innerHTML = contacts.map(contact => {
-                    const fullName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
-                    
-                    // Create the clickable link for the name
-                    const nameCellContent = contact.linkedin_url ? 
-                        `<a href="${contact.linkedin_url}" target="_blank" class="text-indigo-600 hover:text-indigo-800 font-medium hover:underline">
-                            ${fullName}
-                        </a>` : 
-                        `<span class="text-gray-800">${fullName}</span>`;
-
-                    return `
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-6 py-3 whitespace-nowrap">${nameCellContent}</td>
-                            <td class="px-6 py-3 whitespace-nowrap">${contact.job_title || 'N/A'}</td>
-                            <td class="px-6 py-3 text-blue-600 whitespace-nowrap">${contact.email || 'N/A'}</td>
-                        </tr>
-                    `;
-                }).join('');
-            } else {
-                contactsTableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-gray-500 italic">No contacts found for this company.</td></tr>';
-            }
-            
-        } else {
-            console.error('Error loading related data:', data.message);
-        }
-
-    } catch (error) {
-        console.error('Fetch error for related data:', error);
-    }
-}
-
-
-// --- Update Submission Function ---
-
-/** Handles the form submission to update the company profile via PUT request. */
-async function handleUpdate(event) {
-    event.preventDefault();
-    
-    if (!currentCompanyId) {
-        showStatus('Please select a company profile first before saving.', 'error');
+    if (!rawNames || rawNames.length === 0) {
+        rawNamesList.innerHTML = '<p class="text-sm text-gray-500 italic">No raw names mapped yet.</p>';
         return;
     }
+
+    const listHtml = rawNames.map(name => `
+        <span class="inline-flex items-center px-3 py-1 mr-2 mb-2 text-xs font-medium bg-indigo-100 text-indigo-800 rounded-full">
+            ${name}
+        </span>
+    `).join('');
+
+    rawNamesList.innerHTML = `<div class="flex flex-wrap">${listHtml}</div>`;
+}
+
+/**
+ * Renders the associated contacts table.
+ * @param {Array<Object>} contacts 
+ */
+function renderContacts(contacts) {
+    contactCountSpan.textContent = (contacts && contacts.length) || 0;
+    
+    if (!contacts || contacts.length === 0) {
+        contactsTableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-gray-500 italic">No contacts associated with this company.</td></tr>';
+        return;
+    }
+    
+    const html = contacts.map(contact => {
+        let nameContent;
+        if (contact.linkedin_url) {
+            nameContent = `
+                <a href="${contact.linkedin_url}" target="_blank" 
+                   class="text-primary hover:text-indigo-700 transition duration-150 flex items-center">
+                    <i data-lucide="linkedin" class="w-4 h-4 mr-1"></i>
+                    ${contact.name}
+                </a>
+            `;
+        } else {
+            nameContent = contact.name;
+        }
+
+        return `
+            <tr class="hover:bg-gray-50 transition duration-100">
+                <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                    ${nameContent}
+                </td>
+                <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-500">${contact.job_title}</td>
+                <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-500">${contact.email}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    contactsTableBody.innerHTML = html;
+    // Re-initialize icons for the new content (especially the LinkedIn icon)
+    lucide.createIcons();
+}
+
+
+// --- Data Fetching and Logic ---
+
+/**
+ * Main function to fetch company list with current filters applied.
+ */
+async function fetchCompaniesWithFilter() {
+    const search = searchFilter.value.trim();
+    const target = targetFilter.value; // 'all', 'true', or 'false'
+    
+    let url = API_BASE;
+    const params = new URLSearchParams();
+    
+    if (search) {
+        params.append('search', search);
+    }
+    if (target !== 'all') {
+        params.append('target_interest', target);
+    }
+
+    if (params.toString()) {
+        url += '?' + params.toString();
+    }
+    
+    try {
+        // Show loading state in the sidebar
+        companyListElement.innerHTML = '<div class="p-4 text-center text-gray-500 italic"><i data-lucide="loader-circle" class="w-5 h-5 inline mr-2 animate-spin"></i>Loading companies...</div>';
+        lucide.createIcons();
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        // The API is expected to return { companies: [...] }
+        allCompanies = data.companies || []; 
+        
+        renderCompanyList(allCompanies);
+
+    } catch (error) {
+        console.error('Error fetching company list:', error);
+        companyListElement.innerHTML = '<div class="p-4 text-center text-error italic">Failed to load companies. Check API connection.</div>';
+    }
+}
+
+/**
+ * Initial load function (simply calls the filter function).
+ */
+function fetchAllCompanies() {
+    fetchCompaniesWithFilter();
+}
+
+
+/**
+ * Fetches and displays a single company's detailed profile, including related data.
+ * This function now uses two chained API calls to get core profile data and then related data.
+ * @param {number} companyId 
+ * @param {HTMLElement} linkElement 
+ */
+// management.js (updated to fix profile loading issues)
+async function loadCompanyProfile(companyId, linkElement) {
+    if (currentCompanyId === companyId) return;
+
+    // 1. Update active link in the sidebar
+    if (currentActiveLink) {
+        currentActiveLink.classList.remove('active');
+    }
+    linkElement.classList.add('active');
+    currentActiveLink = linkElement;
+
+    // 2. Update global state and UI
+    currentCompanyId = companyId;
+    initialMessage.classList.add('hidden');
+    profileContainer.classList.remove('hidden');
+    companyTitle.textContent = 'Loading...';
+    
+    // Clear dynamic content while loading
+    rawNamesList.innerHTML = '<p class="text-sm text-gray-500 italic">Loading...</p>';
+    contactsTableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-gray-500 italic">Loading...</td></tr>';
+
+    try {
+        // --- API Call 1: Fetch Core Profile Data (GET /api/companies/<id>) ---
+        const profileUrl = `${API_BASE}/${companyId}`; 
+        const profileResponse = await fetch(profileUrl);
+        
+        if (!profileResponse.ok) {
+            throw new Error(`HTTP error! status: ${profileResponse.status} for profile.`);
+        }
+        
+        const profileData = await profileResponse.json();
+        
+        // FIX 1: Extract the profile data from the 'company' key
+        const profile = profileData.company; 
+
+        // FIX 2: Check for the correct field name: 'company_name_clean'
+        if (!profile || typeof profile.company_name_clean === 'undefined') {
+            throw new Error("API response structure error: Profile data object or 'company_name_clean' missing.");
+        }
+        
+        // Populate form fields (Profile Data)
+        companyTitle.textContent = profile.company_name_clean;
+        companyIdInput.value = profile.company_id;
+        // CORRECTED: Use the correct field name to populate the input
+        cleanNameInput.value = profile.company_name_clean || '';
+        
+        headquartersInput.value = profile.headquarters || '';
+        employeesInput.value = profile.size_employees || '';
+        revenueInput.value = profile.annual_revenue || '';
+        revenueScaleSelect.value = profile.revenue_scale || 'N';
+        notesTextarea.value = profile.notes || '';
+        targetInterestCheckbox.checked = profile.target_interest;
+
+
+        // --- API Call 2: Fetch Related Data (GET /api/related_data/<id>) ---
+        const relatedUrl = `/api/related_data/${companyId}`;
+        const relatedResponse = await fetch(relatedUrl);
+
+        if (relatedResponse.ok) {
+            const relatedData = await relatedResponse.json();
+            
+            // The API is expected to return { raw_names: [], contacts: [] }
+            const rawNames = relatedData.raw_names || [];
+            const contacts = relatedData.contacts || [];
+
+            // Render Mapped Names and Contacts (Related Data)
+            renderRawNames(rawNames);
+            renderContacts(contacts);
+        } else {
+            console.warn(`Warning: Failed to fetch related data (Status: ${relatedResponse.status}). Displaying empty lists.`);
+            renderRawNames([]);
+            renderContacts([]);
+        }
+
+    } catch (error) {
+        console.error('Error loading company profile:', error);
+        companyTitle.textContent = 'Error Loading Profile';
+        showStatus('Failed to load company profile details. Check console for API status.', 'error');
+        resetProfileView(); 
+    }
+}
+/**
+ * Handles the form submission (PUT request to update profile).
+ * @param {Event} event 
+ */
+async function handleUpdate(event) {
+    event.preventDefault();
     
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
 
-    // 1. Collect all form data
-    const updatedData = {
-        company_name_clean: cleanNameInput.value.trim(),
-        headquarters: headquartersInput.value.trim() || null,
-        
-        // Convert empty string/null to null for database
-        size_employees: employeesInput.value ? parseInt(employeesInput.value, 10) : null,
-        annual_revenue: revenueInput.value ? parseFloat(revenueInput.value) : null,
-        
-        revenue_scale: revenueScaleSelect.value || null,
+    const companyId = companyIdInput.value;
+    const url = `${API_BASE}/${companyId}`;
+    
+    // Collect form data
+    const formData = {
+        clean_name: cleanNameInput.value.trim(), 
+        headquarters: headquartersInput.value.trim(),
+        size_employees: parseInt(employeesInput.value) || null,
+        annual_revenue: parseFloat(revenueInput.value) || null,
+        revenue_scale: revenueScaleSelect.value,
         target_interest: targetInterestCheckbox.checked,
-        notes: notesTextarea.value.trim() || null
+        notes: notesTextarea.value.trim(),
     };
 
-    if (!updatedData.company_name_clean) {
-        showStatus('Company name is mandatory. Please provide a clean name.', 'error');
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Changes';
-        return;
-    }
-
     try {
-        const response = await fetch(`${API_BASE}/${currentCompanyId}`, {
+        const response = await fetch(url, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(updatedData),
+            body: JSON.stringify(formData),
         });
 
         const data = await response.json();
 
         if (response.ok) {
-            // Update local state and list rendering after successful save
-            const companyIndex = allCompanies.findIndex(c => c.company_id === currentCompanyId);
-            if (companyIndex !== -1) {
-                // Update properties, excluding raw_names and contacts
-                allCompanies[companyIndex] = { 
-                    ...allCompanies[companyIndex], 
-                    company_name_clean: updatedData.company_name_clean,
-                    target_interest: updatedData.target_interest 
-                };
+            fetchCompaniesWithFilter();
+            showStatus(data.message || 'Company profile updated successfully.', 'success');
+            
+            if (currentActiveLink) {
+                currentActiveLink.classList.remove('active');
+                currentActiveLink.classList.add('active'); 
             }
-            renderCompanyList(); // Re-render to update name or TARGET flag if they changed
-            companyTitle.textContent = `${updatedData.company_name_clean} (ID: ${currentCompanyId})`;
-            showStatus(data.message || 'Profile updated successfully!', 'success');
+
         } else {
+            console.error('Server update failure:', data);
             showStatus(`Update failed: ${data.message || 'Server error occurred.'}`, 'error');
         }
 
@@ -336,6 +408,9 @@ async function handleUpdate(event) {
     }
 }
 
+// Create a debounced version of the company list loading function for filters
+const debouncedLoadCompanies = debounce(fetchCompaniesWithFilter, 300);
+
 // --- Event Listeners ---
 
 // 1. Filter and Search listeners (debounced)
@@ -344,9 +419,9 @@ targetFilter.addEventListener('change', debouncedLoadCompanies);
 
 // 2. Company List click listener
 companyListElement.addEventListener('click', (event) => {
-    // Use closest() to find the clickable link element regardless of where the click landed inside it
     const link = event.target.closest('.company-name-link'); 
     if (link) {
+        event.preventDefault(); 
         const companyId = parseInt(link.getAttribute('data-id'), 10);
         if (companyId > 0) {
             loadCompanyProfile(companyId, link);
@@ -359,5 +434,65 @@ companyForm.addEventListener('submit', handleUpdate);
 
 // 4. Initial Load
 document.addEventListener('DOMContentLoaded', () => {
-    fetchAllCompanies();
+    lucide.createIcons();
+    fetchAllCompanies(); 
 });
+/**
+ * Retrieves the company ID from the URL query parameter 'company_id'.
+ * @returns {number|null} The company ID or null if not found.
+ */
+function getCompanyIdFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    // FIX: Look for 'company_id' to match the index.html link
+    const id = params.get('company_id'); 
+    return id ? parseInt(id, 10) : null;
+}
+// --- Initial Load Logic ---
+async function initialLoad() {
+    // 1. Initialize Lucide icons
+    lucide.createIcons();
+
+    const companyIdFromUrl = getCompanyIdFromUrl();
+
+    // 2. Always fetch the full company list first (to populate the sidebar)
+    // The previous profile loading fixes are already integrated into loadCompanyProfile
+    await fetchCompaniesWithFilter();
+
+    // 3. If an ID was in the URL, load the specific profile
+    if (companyIdFromUrl) {
+        // Find the newly rendered link element in the sidebar list
+        const linkElement = document.querySelector(`.company-name-link[data-id="${companyIdFromUrl}"]`);
+
+        if (linkElement) {
+            // Load the profile and mark it as active
+            await loadCompanyProfile(companyIdFromUrl, linkElement);
+            
+            // Optional: Clean up the URL bar
+            window.history.replaceState(null, null, window.location.pathname);
+        } else {
+            // This happens if the company list fetch failed or the company was filtered out
+            console.warn(`Company ID ${companyIdFromUrl} not found in the sidebar list after fetching.`);
+        }
+    }
+}
+
+
+// ... (Keep the debouncedLoadCompanies and Event Listeners logic the same) ...
+
+
+// --- Event Listeners (Ensure this is the very last part of the file) ---
+
+// 1. Filter and Search listeners (debounced)
+searchFilter.addEventListener('input', debouncedLoadCompanies);
+targetFilter.addEventListener('change', debouncedLoadCompanies);
+
+// 2. Company List click listener
+companyListElement.addEventListener('click', (event) => {
+    // ... (Existing click logic remains here)
+});
+
+// 3. Form Submission (PUT request)
+companyForm.addEventListener('submit', handleUpdate);
+
+// 4. Initial Load - Now calls the new logic
+document.addEventListener('DOMContentLoaded', initialLoad);

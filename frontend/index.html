@@ -1,356 +1,295 @@
-<!-- 
-    Filename: index.html
-    Last Edited: 2025-10-24
-    Purpose: Primary landing page/dashboard for viewing, filtering, and sorting standardized company profiles.
--->
+<!-- FILENAME: index.html | LAST EDITED: 2025-10-24 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Company Data Dashboard</title>
+    <title>JobAssist | Company Dashboard</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load Lucide Icons for sorting arrows -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Use Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
     <style>
-        /* Inter font setup and custom styles */
-        html { font-family: 'Inter', sans-serif; }
-        .sortable-header {
-            cursor: pointer;
-            user-select: none;
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc; /* Light background for the dashboard */
         }
-        .container-height {
-            min-height: calc(100vh - 8rem); 
+        .container-padding {
+            padding: 1.5rem 1rem;
+        }
+        @media (min-width: 640px) {
+            .container-padding {
+                padding: 2.5rem 2rem;
+            }
+        }
+        .loading-animation {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6; /* Blue spinner */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
+</head>
+<body class="min-h-screen">
+
+    <main class="container-padding max-w-7xl mx-auto">
+        <h2 class="text-3xl font-bold text-gray-800 mb-6">Company Dashboard</h2>
+        <p class="text-gray-600 mb-8">Overview of all standardized company profiles and enriched data. Click a **Clean Name** to go to the Management page.</p>
+
+        <!-- Main Data Container -->
+        <div class="bg-white shadow-xl rounded-xl overflow-hidden">
+            <div id="loadingMessage" class="flex justify-center items-center p-10 hidden">
+                <div class="loading-animation mr-3"></div>
+                <p class="text-gray-500">Loading company data...</p>
+            </div>
+
+            <div id="errorMessage" class="text-red-600 bg-red-50 p-6 hidden">
+                <p class="font-bold">Error Loading Data:</p>
+                <p id="errorDetail"></p>
+            </div>
+
+            <!-- Table Container -->
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <!-- Company Name Column -->
+                            <th id="header-company_name_clean" scope="col" class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 transition duration-150" onclick="sortTable('company_name_clean')">
+                                Clean Company Name
+                                <span class="sort-indicator text-gray-400 ml-1" data-column="company_name_clean"></span>
+                            </th>
+                            <!-- Employee Size Column -->
+                            <th id="header-size_employees" scope="col" class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 transition duration-150" onclick="sortTable('size_employees')">
+                                Employee Size
+                                <span class="sort-indicator text-gray-400 ml-1" data-column="size_employees"></span>
+                            </th>
+                            <!-- Annual Revenue Column -->
+                            <th id="header-annual_revenue" scope="col" class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 transition duration-150" onclick="sortTable('annual_revenue')">
+                                Annual Revenue
+                                <span class="sort-indicator text-gray-400 ml-1" data-column="annual_revenue"></span>
+                            </th>
+                            <!-- Target Interest Column -->
+                            <th id="header-target_interest" scope="col" class="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 transition duration-150" onclick="sortTable('target_interest')">
+                                Target Interest
+                                <span class="sort-indicator text-gray-400 ml-1" data-column="target_interest"></span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="companyTableBody" class="bg-white divide-y divide-gray-200">
+                        <!-- Data will be injected here by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <p id="noDataMessage" class="p-6 text-center text-gray-500 hidden">
+                No standardized company profiles found. Please use the Cleanup Tool to map raw names.
+            </p>
+        </div>
+    </main>
+
+    <script>
+        // State management for sorting
+        let companyData = [];
+        let currentSort = { column: 'company_name_clean', direction: 'asc' };
+
+        // Utility: Formats a number with commas (e.g., 150000 -> 150,000)
+        const formatNumber = (num) => {
+            if (num === null || num === undefined) return 'N/A';
+            return num.toLocaleString('en-US');
+        };
+
+        // Utility: Formats revenue (e.g., 5.2, 'B' -> $5.2 B)
+        const formatRevenue = (revenue, scale) => {
+            if (revenue === null || revenue === undefined) return 'N/A';
+            return `$${revenue} ${scale || ''}`;
+        };
+
+        // Renders the data into the table body
+        const renderTable = (data) => {
+            const tbody = document.getElementById('companyTableBody');
+            tbody.innerHTML = '';
+            
+            if (data.length === 0) {
+                document.getElementById('noDataMessage').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('noDataMessage').classList.add('hidden');
+
+            data.forEach(company => {
+                const revenueDisplay = formatRevenue(company.annual_revenue, company.revenue_scale);
+                const sizeDisplay = formatNumber(company.size_employees);
+                const targetDisplay = company.target_interest
+                    ? '<svg class="w-5 h-5 text-yellow-500 inline-block align-middle" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.695h3.462c.969 0 1.371 1.24.588 1.81l-2.817 2.042a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.817-2.042a1 1 0 00-1.175 0l-2.817 2.042c-.785.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.05 8.724c-.783-.57-.381-1.81.588-1.81h3.461a1 1 0 00.951-.695l1.07-3.292z" /></svg>' // Star Icon
+                    : '';
+
+                const row = tbody.insertRow();
+                
+                // Clean Company Name (Link to Management)
+                let cellName = row.insertCell();
+                cellName.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800 transition duration-150 cursor-pointer';
+                cellName.innerHTML = `<a href="management.html?company_id=${company.company_id}" class="hover:underline">${company.company_name_clean}</a>`;
+
+                // Employee Size
+                let cellSize = row.insertCell();
+                cellSize.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-700';
+                cellSize.textContent = sizeDisplay;
+
+                // Annual Revenue
+                let cellRevenue = row.insertCell();
+                cellRevenue.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-700';
+                cellRevenue.textContent = revenueDisplay;
+
+                // Target Interest
+                let cellTarget = row.insertCell();
+                cellTarget.className = 'px-6 py-4 whitespace-nowrap text-sm text-center';
+                cellTarget.innerHTML = targetDisplay;
+            });
+
+            updateSortIndicators();
+        };
+
+        // Sorts the companyData array and re-renders the table
+        const sortTable = (column) => {
+            if (currentSort.column === column) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.column = column;
+                currentSort.direction = 'asc';
+            }
+
+            companyData.sort((a, b) => {
+                let valA, valB;
+
+                // Special handling for revenue to combine numeric part and scale
+                if (column === 'annual_revenue') {
+                    // Convert revenue to a comparable value (e.g., 5.2 B -> 5,200,000,000)
+                    const getComparableRevenue = (company) => {
+                        // Null revenue is already treated as 0 here
+                        const val = parseFloat(company.annual_revenue) || 0;
+                        const scale = company.revenue_scale;
+                        if (scale === 'K') return val * 1e3;
+                        if (scale === 'M') return val * 1e6;
+                        if (scale === 'B') return val * 1e9;
+                        return val; // Default if scale is missing or unknown
+                    };
+                    valA = getComparableRevenue(a);
+                    valB = getComparableRevenue(b);
+                } else {
+                    // This handles all other columns: company_name_clean, size_employees, target_interest
+                    if (column === 'size_employees') {
+                        // Per user request: treat null (N/A) as 0 for numeric size sorting
+                        valA = a[column] === null ? 0 : a[column];
+                        valB = b[column] === null ? 0 : b[column];
+                    } else {
+                        // For non-numeric columns (strings/booleans), continue to sort nulls to the ends
+                        // by using -Infinity/Infinity based on sort direction
+                        valA = a[column] === null ? (currentSort.direction === 'asc' ? -Infinity : Infinity) : a[column];
+                        valB = b[column] === null ? (currentSort.direction === 'asc' ? -Infinity : Infinity) : b[column];
+                    }
+                }
+                
+                // Default comparison for strings, numbers, and booleans
+                if (valA < valB) {
+                    return currentSort.direction === 'asc' ? -1 : 1;
+                }
+                if (valA > valB) {
+                    return currentSort.direction === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+
+            renderTable(companyData);
+        };
+
+        // Updates the visual indicators (arrows) in the table headers
+        const updateSortIndicators = () => {
+            document.querySelectorAll('.sort-indicator').forEach(span => {
+                span.innerHTML = '';
+            });
+
+            const currentSpan = document.querySelector(`.sort-indicator[data-column="${currentSort.column}"]`);
+            if (currentSpan) {
+                currentSpan.innerHTML = currentSort.direction === 'asc' ? '&#9650;' : '&#9660;'; // Up/Down Triangles
+            }
+        };
+
+        // Main function to fetch data
+        const fetchCompanies = async () => {
+            const loading = document.getElementById('loadingMessage');
+            const errorDiv = document.getElementById('errorMessage');
+            loading.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+
+            try {
+                // Implementing exponential backoff for robustness
+                const maxRetries = 3;
+                let response = null;
+
+                for (let attempt = 0; attempt < maxRetries; attempt++) {
+                    response = await fetch('/api/companies');
+                    if (response.ok) {
+                        break;
+                    }
+                    if (attempt < maxRetries - 1) {
+                        const delay = Math.pow(2, attempt) * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else {
+                        throw new Error(`Failed to fetch data after ${maxRetries} attempts. Status: ${response.status}`);
+                    }
+                }
+
+                const result = await response.json();
+
+                if (result.status === 'success' && Array.isArray(result.companies)) {
+                    companyData = result.companies;
+                    // Initial sort by clean name (default)
+                    sortTable(currentSort.column);
+                } else {
+                    throw new Error(result.message || 'API returned a non-success status or malformed data.');
+                }
+
+            } catch (error) {
+                console.error("Fetch Error:", error);
+                document.getElementById('errorDetail').textContent = error.message;
+                errorDiv.classList.remove('hidden');
+                // Render an empty table if the fetch fails
+                renderTable([]);
+            } finally {
+                loading.classList.add('hidden');
+            }
+        };
+
+        // Initialize the dashboard on page load
+        window.onload = fetchCompanies;
+
+    </script>
+    <main class="container-padding mx-auto max-w-7xl mt-4">
+        </main>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
                     colors: {
-                        'primary': '#4f46e5', /* Indigo 600 */
-                        'success': '#10b981',
-                        'info': '#3b82f6',
+                        'primary': '#4f46e5', // indigo-600
+                        'success': '#10b981', // emerald-500
+                        'error': '#ef4444',   // red-500
                     }
                 }
             }
         }
     </script>
-</head>
-<body class="bg-gray-50 min-h-screen">
-
-    <!-- Global Navigation Bar -->
-    <header class="bg-white shadow-md sticky top-0 z-10">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16 items-center">
-                <div class="flex-shrink-0 flex items-center">
-                    <span class="text-xl font-bold text-primary">Contact Data Dashboard</span>
-                </div>
-                <nav class="flex space-x-4">
-                    <a href="index.html" class="bg-primary text-white px-3 py-2 rounded-lg text-sm font-medium" aria-current="page">
-                        <i data-lucide="layout-dashboard" class="w-4 h-4 inline-block mr-1"></i> Dashboard
-                    </a>
-                    <a href="cleanup.html" class="text-gray-600 hover:text-primary px-3 py-2 rounded-lg text-sm font-medium transition duration-150">
-                        <i data-lucide="link-2" class="w-4 h-4 inline-block mr-1"></i> Cleanup (Mapping)
-                    </a>
-                    <a href="management.html" class="text-gray-600 hover:text-primary px-3 py-2 rounded-lg text-sm font-medium transition duration-150">
-                        <i data-lucide="briefcase" class="w-4 h-4 inline-block mr-1"></i> Management
-                    </a>
-                </nav>
-            </div>
-        </div>
-    </header>
-
-    <!-- Main Content Area -->
-    <main class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 container-height">
-        <h1 class="text-3xl font-extrabold text-gray-900 mb-6 flex items-center">
-            Standardized Company List
-        </h1>
-
-        <!-- Filter Controls -->
-        <div class="bg-white shadow-lg rounded-xl p-4 mb-8 flex flex-col sm:flex-row gap-4 items-stretch">
-            <div class="flex-grow">
-                <label for="searchFilter" class="block text-sm font-medium text-gray-700 mb-1">Search Company Name</label>
-                <input type="text" id="searchFilter" placeholder="Live search by clean name..." 
-                       class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
-            </div>
-            <div>
-                <label for="targetFilter" class="block text-sm font-medium text-gray-700 mb-1">Target Interest</label>
-                <select id="targetFilter" class="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary bg-white">
-                    <option value="all">Show All</option>
-                    <option value="true">Target: Yes (★)</option>
-                    <option value="false">Target: No</option>
-                </select>
-            </div>
-        </div>
-
-        <!-- Company Data Table -->
-        <div class="bg-white shadow-lg rounded-xl overflow-hidden">
-            <div id="loadingIndicator" class="text-center p-8 text-xl font-medium text-primary">
-                <i data-lucide="loader-circle" class="w-6 h-6 inline-block animate-spin mr-2"></i> Loading Company Data...
-            </div>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <!-- Company Name (Sortable) -->
-                            <th scope="col" data-column="company_name_clean" class="sortable-header px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                <div class="flex items-center">
-                                    Name 
-                                    <span class="sort-icon ml-1" data-icon-for="company_name_clean"><i data-lucide="arrow-down-up" class="w-3 h-3 text-gray-400"></i></span>
-                                </div>
-                            </th>
-                            
-                            <!-- Target Interest (Fixed) -->
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Target
-                            </th>
-                            
-                            <!-- Employees (Sortable) -->
-                            <th scope="col" data-column="size_employees" class="sortable-header px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                <div class="flex items-center">
-                                    Employees 
-                                    <span class="sort-icon ml-1" data-icon-for="size_employees"><i data-lucide="arrow-down-up" class="w-3 h-3 text-gray-400"></i></span>
-                                </div>
-                            </th>
-                            
-                            <!-- Annual Revenue (Sortable) -->
-                            <th scope="col" data-column="annual_revenue" class="sortable-header px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                <div class="flex items-center">
-                                    Annual Revenue 
-                                    <span class="sort-icon ml-1" data-icon-for="annual_revenue"><i data-lucide="arrow-down-up" class="w-3 h-3 text-gray-400"></i></span>
-                                </div>
-                            </th>
-                            
-                            <!-- Headquarters (Sortable) -->
-                            <th scope="col" data-column="headquarters" class="sortable-header px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                <div class="flex items-center">
-                                    HQ Location 
-                                    <span class="sort-icon ml-1" data-icon-for="headquarters"><i data-lucide="arrow-down-up" class="w-3 h-3 text-gray-400"></i></span>
-                                </div>
-                            </th>
-                            
-                            <!-- Notes (Fixed) -->
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Notes
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody id="companyTableBody" class="bg-white divide-y divide-gray-200">
-                        <!-- Data rows will be injected here by script -->
-                    </tbody>
-                </table>
-            </div>
-            <div id="noDataMessage" class="text-center p-8 text-gray-500 hidden">
-                No company data available or no results match your current filter.
-            </div>
-        </div>
-    </main>
-
-    <!-- JavaScript Logic -->
-    <script>
-        const API_BASE = '/api';
-        let allCompanies = [];
-        let sortState = {
-            column: 'company_name_clean',
-            direction: 'asc' // 'asc' or 'desc'
-        };
-
-        const elements = {
-            tableBody: document.getElementById('companyTableBody'),
-            loadingIndicator: document.getElementById('loadingIndicator'),
-            noDataMessage: document.getElementById('noDataMessage'),
-            searchFilter: document.getElementById('searchFilter'),
-            targetFilter: document.getElementById('targetFilter')
-        };
-
-        /**
-         * Custom sort function for the company list.
-         * Handles string, number, and null/undefined values correctly.
-         * @param {string} column - The key to sort by.
-         * @param {string} direction - 'asc' or 'desc'.
-         */
-        function sortCompanies(companies, column, direction) {
-            return companies.sort((a, b) => {
-                let valA = a[column];
-                let valB = b[column];
-
-                // Treat null/undefined/empty string as smallest values for sorting
-                const isANull = valA === null || valA === undefined || valA === '';
-                const isBNull = valB === null || valB === undefined || valB === '';
-
-                if (isANull && isBNull) return 0;
-                if (isANull) return direction === 'asc' ? -1 : 1; // Put nulls first in ASC, last in DESC
-                if (isBNull) return direction === 'asc' ? 1 : -1; // Put nulls first in ASC, last in DESC
-
-                let comparison = 0;
-                
-                // Numeric comparison
-                if (typeof valA === 'number' && typeof valB === 'number') {
-                    comparison = valA - valB;
-                } 
-                // String comparison (case-insensitive)
-                else {
-                    comparison = String(valA).toLowerCase().localeCompare(String(valB).toLowerCase());
-                }
-
-                return direction === 'asc' ? comparison : -comparison;
-            });
-        }
-
-        /**
-         * Filters the main company list based on current UI inputs.
-         * @param {Array} list - The list of companies to filter.
-         * @returns {Array} - The filtered list.
-         */
-        function filterCompanies(list) {
-            const searchTerm = elements.searchFilter.value.toLowerCase();
-            const targetFilterValue = elements.targetFilter.value;
-
-            return list.filter(company => {
-                // 1. Search Filter
-                const matchesSearch = !searchTerm || company.company_name_clean.toLowerCase().includes(searchTerm);
-
-                // 2. Target Filter
-                const isTarget = company.target_interest === true;
-                const matchesTarget = targetFilterValue === 'all' || 
-                                      (targetFilterValue === 'true' && isTarget) || 
-                                      (targetFilterValue === 'false' && !isTarget);
-                
-                return matchesSearch && matchesTarget;
-            });
-        }
-
-        /**
-         * Renders the company data table based on current filters and sort state.
-         */
-        function renderCompanyTable() {
-            elements.tableBody.innerHTML = '';
-            
-            // 1. Filter
-            let filteredList = filterCompanies(allCompanies);
-            
-            // 2. Sort
-            let sortedList = sortCompanies(filteredList, sortState.column, sortState.direction);
-
-            // 3. Update UI
-            if (sortedList.length === 0) {
-                elements.noDataMessage.classList.remove('hidden');
-                return;
-            }
-            elements.noDataMessage.classList.add('hidden');
-
-            sortedList.forEach(company => {
-                // Format Revenue (handling nulls)
-                const revenueDisplay = company.annual_revenue && company.revenue_scale 
-                    ? `$${company.annual_revenue.toLocaleString('en-US', {maximumFractionDigits: 1})}${company.revenue_scale}`
-                    : 'N/A';
-
-                // Format Employees (handling nulls)
-                const employeesDisplay = company.size_employees ? company.size_employees.toLocaleString('en-US') : 'N/A';
-
-                // Target Indicator
-                const targetIndicator = company.target_interest 
-                    ? '<span class="text-success font-bold">★ YES</span>' 
-                    : '<span class="text-gray-400">NO</span>';
-
-                const row = elements.tableBody.insertRow();
-                row.className = 'hover:bg-gray-50 transition-colors';
-                
-                row.innerHTML = `
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${company.company_name_clean}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm">${targetIndicator}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${employeesDisplay}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${revenueDisplay}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${company.headquarters || 'N/A'}</td>
-                    <td class="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title="${company.notes || ''}">${company.notes || 'No notes'}</td>
-                `;
-            });
-            updateSortIcons();
-        }
-
-        /**
-         * Updates the visual indicator on the currently sorted column.
-         */
-        function updateSortIcons() {
-            document.querySelectorAll('.sort-icon').forEach(iconContainer => {
-                const column = iconContainer.getAttribute('data-icon-for');
-                iconContainer.innerHTML = ''; // Clear existing icon
-
-                if (column === sortState.column) {
-                    const iconName = sortState.direction === 'asc' ? 'chevron-up' : 'chevron-down';
-                    iconContainer.innerHTML = `<i data-lucide="${iconName}" class="w-4 h-4 text-primary"></i>`;
-                } else {
-                    iconContainer.innerHTML = `<i data-lucide="arrow-down-up" class="w-3 h-3 text-gray-400"></i>`;
-                }
-            });
-            lucide.createIcons(); // Re-render Lucide icons
-        }
-
-        /**
-         * Event handler for clickable table headers.
-         */
-        function handleSortClick(e) {
-            const header = e.currentTarget;
-            const column = header.getAttribute('data-column');
-
-            if (sortState.column === column) {
-                // Toggle direction
-                sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
-            } else {
-                // Change column, default to ascending
-                sortState.column = column;
-                sortState.direction = 'asc';
-            }
-            renderCompanyTable();
-        }
-
-        /**
-         * Fetches all standardized company profiles from the backend (API Reference 2.1).
-         */
-        async function fetchCompanies() {
-            elements.loadingIndicator.classList.remove('hidden');
-            try {
-                // Assuming API Reference 2.1: GET /api/companies
-                const response = await fetch(`${API_BASE}/companies`);
-                const data = await response.json();
-                
-                if (data.companies) {
-                    allCompanies = data.companies;
-                    renderCompanyTable();
-                } else {
-                    throw new Error(data.message || 'Data structure error.');
-                }
-            } catch (error) {
-                console.error('Error fetching companies:', error);
-                elements.loadingIndicator.innerHTML = `<i data-lucide="alert-triangle" class="w-6 h-6 inline-block mr-2 text-error-red"></i> Error loading data: ${error.message}`;
-                elements.loadingIndicator.classList.add('text-error-red/80');
-                elements.tableBody.innerHTML = '';
-            } finally {
-                elements.loadingIndicator.classList.add('hidden');
-            }
-        }
-
-        // --- Event Listeners and Initialization ---
-
-        window.onload = function() {
-            // Initialize Lucide icons
-            lucide.createIcons();
-            
-            // Attach sort click handlers to headers
-            document.querySelectorAll('.sortable-header').forEach(header => {
-                header.addEventListener('click', handleSortClick);
-            });
-
-            // Attach filter change handlers
-            elements.searchFilter.addEventListener('input', renderCompanyTable);
-            elements.targetFilter.addEventListener('change', renderCompanyTable);
-            
-            // Initial data fetch
-            fetchCompanies();
-        };
-
-    </script>
+        <script src="navbar.js"></script> 
+    
 </body>
 </html>
