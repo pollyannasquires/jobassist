@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Record New Application | JobAssist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], },
+                    colors: {
+                        'primary': '#4f46e5', // indigo-600
+                        'success': '#10b981', // emerald-500
+                        'error': '#ef4444',   // red-500
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
+    </style>
+</head>
+<body>
+    
+    <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-12">
+        <div id="statusMessage" class="hidden fixed top-20 right-4 p-4 rounded-lg shadow-xl text-white z-50"></div>
+
+        <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Record New Application</h1>
+        <p class="text-xl text-gray-600 mb-6">for: <span id="companyNameDisplay" class="font-semibold text-primary">Loading...</span></p>
+
+        <form id="newApplicationForm" class="bg-white p-6 sm:p-8 rounded-xl shadow-lg space-y-8">
+            
+            <fieldset class="border-b border-gray-200 pb-6">
+                <legend class="text-2xl font-bold text-gray-800 mb-4">1. Basic Information</legend>
+                <div class="space-y-4">
+                    <div>
+                        <label for="jobTitle" class="block text-sm font-medium text-gray-700">Job Title</label>
+                        <input type="text" id="jobTitle" name="jobTitle" required
+                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary">
+                        <p class="mt-1 text-xs text-gray-500">e.g., Senior Software Engineer</p>
+                    </div>
+
+                    <div>
+                        <label for="dateApplied" class="block text-sm font-medium text-gray-700">Date Applied</label>
+                        <input type="date" id="dateApplied" name="dateApplied" required
+                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary">
+                    </div>
+                </div>
+            </fieldset>
+
+            <fieldset class="space-y-6">
+                <legend class="text-2xl font-bold text-gray-800 mb-4">2. Required Documents</legend>
+
+                <div class="space-y-4">
+                    <div class="border border-gray-200 p-4 rounded-lg">
+                        <label for="jobDescriptionFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
+                            <i data-lucide="file-text" class="w-5 h-5 mr-2 text-primary"></i> Job Description (PDF/DOCX)
+                        </label>
+                        <input type="file" id="jobDescriptionFile" name="JOB_DESCRIPTION" accept=".pdf,.docx" required
+                               class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
+                    </div>
+
+                    <div class="border border-gray-200 p-4 rounded-lg">
+                        <label for="resumeFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
+                            <i data-lucide="user" class="w-5 h-5 mr-2 text-primary"></i> Resume (PDF/DOCX)
+                        </label>
+                        <input type="file" id="resumeFile" name="RESUME" accept=".pdf,.docx" required
+                               class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
+                    </div>
+
+                    <div class="border border-gray-200 p-4 rounded-lg">
+                        <label for="assessmentFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
+                            <i data-lucide="clipboard-check" class="w-5 h-5 mr-2 text-primary"></i> Assessment Form (PDF/DOCX)
+                        </label>
+                        <input type="file" id="assessmentFile" name="ASSESSMENT_FORM" accept=".pdf,.docx" required
+                               class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
+                    </div>
+                    <div class="border border-gray-200 p-4 rounded-lg">
+                         <label for="otherFiles" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
+                            <i data-lucide="folder" class="w-5 h-5 mr-2 text-primary"></i> Other Supporting Files (Optional, Multiple)
+                        </label>
+                         <input type="file" id="otherFiles" name="OTHER_FILE" accept=".pdf,.docx,.jpg,.png" multiple 
+                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
+                    </div>
+                </div>
+            </fieldset>
+
+            <button type="submit" id="submitBtn"
+                    class="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-lg text-lg font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors disabled:bg-gray-400">
+                <i data-lucide="save" class="w-5 h-5 mr-2"></i> Save Application & Upload Documents
+            </button>
+        </form>
+    </main>
+
+    <script src="navbar.js"></script>
+    <script src="application_create.js"></script>
+</body>
+</html>
