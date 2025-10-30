@@ -1,4 +1,4 @@
-// FILENAME: navbar.js | Purpose: Inject consistent navigation bar across all pages
+// FILENAME: navbar.js | Purpose: Inject consistent navigation bar across all pages and handle sidebar initialization
 
 const navHtml = `
     <nav class="bg-white shadow-md sticky top-0 z-20">
@@ -17,12 +17,19 @@ const navHtml = `
                     <a href="management.html" id="nav-management" class="nav-link text-gray-600 hover:text-primary px-3 py-2 rounded-md text-sm font-medium transition-colors">
                         Management
                     </a>
+                    <!-- FIX for Issue 2.2: Add application_review back into the Navbar -->
+                     <a href="application_review.html" id="nav-application_review" class="nav-link text-gray-600 hover:text-primary px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                        Application Review
+                    </a>
                 </div>
             </div>
         </div>
     </nav>
 `;
 
+/**
+ * Injects the Navbar HTML and sets the active link based on the current page.
+ */
 function injectNavbar() {
     const body = document.body;
     
@@ -37,6 +44,8 @@ function injectNavbar() {
         activeId = 'nav-cleanup';
     } else if (currentPath.includes('management.html')) {
         activeId = 'nav-management';
+    } else if (currentPath.includes('application_review.html')) {
+        activeId = 'nav-application_review'; // Set active for Application Review page
     } else {
         // Default to index.html (Dashboard)
         activeId = 'nav-index';
@@ -49,13 +58,27 @@ function injectNavbar() {
         activeLink.classList.add('bg-primary', 'text-white');
     }
 
-    // 3. Update the height of the main content area
+    // 3. Update the height of the main content area for proper layout below the fixed navbar
     const mainElement = document.querySelector('main');
     if (mainElement) {
-        // The navbar is h-16 (4rem), so main content should fill the rest of the viewport
-        mainElement.style.height = 'calc(100vh - 4rem)';
+        // Set proper padding at the top of main content to account for the fixed navbar
+        mainElement.style.paddingTop = '5rem';
+    }
+
+    // After injection, create lucide icons if the library is loaded
+    if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+        lucide.createIcons();
     }
 }
 
-// Execute the function when the script loads
-injectNavbar();
+
+// --- Initialization ---
+
+// Inject the navbar immediately after the script loads, fixing Issue 2.1
+document.addEventListener('DOMContentLoaded', injectNavbar);
+
+// Expose injectNavbar for pages that load it dynamically
+window.injectNavbar = injectNavbar;
+
+// NOTE: All company/sidebar fetching logic is now correctly located in company_sidebar.js.
+// This resolves the "Cannot set properties of null" error in navbar.js (Issue 2).

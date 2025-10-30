@@ -1,0 +1,25 @@
+<div class="w-full h-full flex flex-col bg-white border-r border-gray-200 shadow-xl overflow-hidden">
+    <div class="p-4 border-b border-gray-200">
+        <h3 class="text-lg font-semibold text-gray-800">Company Profiles</h3>
+    </div>
+    
+    <!-- Search and Filter -->
+    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+        <input type="text" id="sidebarSearchFilter" placeholder="Search by name..."
+               class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-primary focus:border-primary transition-all mb-2">
+        <select id="sidebarTargetFilter"
+                class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-primary focus:border-primary transition-all bg-white">
+            <option value="all">All Companies</option>
+            <option value="target">Target Companies Only</option>
+            <option value="non-target">Non-Target Only</option>
+        </select>
+    </div>
+
+    <!-- Company List -->
+    <div id="companyListContainer" class="flex-grow overflow-y-auto custom-scrollbar">
+        <ul id="companyList" class="divide-y divide-gray-100">
+            <!-- Company list items will be injected here by company_sidebar.js -->
+            <li class="p-4 text-sm text-gray-500 italic">Loading companies...</li>
+        </ul>
+    </div>
+</div>
