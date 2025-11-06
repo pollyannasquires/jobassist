@@ -1085,61 +1085,78 @@ def get_applications_by_company():
             conn.close()
 # ----------------------------------------------------------------------
 # 12. DOCUMENT DOWNLOAD API: GET /api/documents/<string:file_path>
+# Fixes the 404 issue by providing the correct route definition.
 # ----------------------------------------------------------------------
 
-
 @app.route('/api/documents/<string:file_path>', methods=['GET'])
+@authenticate_request()
 def download_document(file_path):
     """
     Endpoint 12: Downloads a document using its secure filename (which is now document_id).
     Requires ownership check before serving the file from disk.
     """
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"status": "error", "message": "Database connection failed"}), 500
+    conn = None
+    cur = None
+    
+    # 1. Input Validation and Accessing Auth User
+    user_id = g.user_id 
+    document_id = file_path # The file_path here is the secure document_id (UUID)
+
+    print(f"--- DEBUG 12.0 START ---")
+    print(f"User ID: {user_id}")
+    print(f"Document ID/File Path: {document_id}")
 
     try:
-        cur = conn.cursor()
-        
-        # 1. Check document existence and ownership (Security critical!)
-        # FIX: Changed 'secure_filename' to 'document_id' for lookup.
+        conn, cur = get_db_cursor()
+        if conn is None:
+             return jsonify({"status": "error", "message": "Database connection failed"}), 500
+
+        # 2. Security Check: Retrieve Document Metadata and Verify Ownership
+        # We join job_documents with applications to ensure the document belongs to an application owned by the user.
         sql_check = """
             SELECT jd.original_filename
             FROM job_documents jd
             JOIN applications a ON jd.application_id = a.application_id
             WHERE jd.document_id = %s AND a.user_id = %s;
         """
-        cur.execute(sql_check, (file_path, MOCK_USER_ID))
-        result = cur.fetchone()
+        cur.execute(sql_check, (document_id, user_id))
+        document_data = cur.fetchone()
 
-        if not result:
+        if document_data is None:
             # File not found OR not owned by the current user (security enforced)
             # Returning 404 instead of 403 prevents attackers from confirming file existence.
             return jsonify({"status": "error", "message": "File not found or unauthorized access."}), 404
         
-        original_filename = result[0]
+        original_filename = document_data[0]
+        print(f"DEBUG 12.0: Document ownership verified. Original filename: {original_filename}")
 
-        # 2. Serve the file securely using Flask's send_from_directory
-        # The file_path parameter contains the document_id (which is the file's UUID on disk).
+        # 3. Serve the file securely using Flask's send_from_directory
         return send_from_directory(
             app.config['UPLOAD_FOLDER'], 
-            file_path, 
+            document_id, # This is the secure filename on disk
             as_attachment=True, # Forces a download dialog
             download_name=original_filename # Uses the user's original file name
         )
 
     except psycopg2.Error as e:
-        print(f"PostgreSQL Error in download_document: {getattr(e.diag, 'message_primary', 'N/A')}")
-        return jsonify({"status": "error", "message": "Database error during ownership check."}), 500
+        if conn: conn.rollback()
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in download_document: {db_error_detail}")
+        return jsonify({"status": "error", "message": f"Database error during ownership check: {db_error_detail}"}), 500
+        
+    except FileNotFoundError:
+        # This occurs if the database record exists, but the file is missing on disk
+        print(f"File not found on disk for Document ID: {document_id}")
+        return jsonify({"status": "error", "message": "Document record found, but file is missing on the server."}), 500
         
     except Exception as e:
         print(f"General Error in download_document: {e}")
-        return jsonify({"status": "error", "message": "Processing error."}), 500
+        return jsonify({"status": "error", "message": "Processing error during file download."}), 500
 
     finally:
-        if conn:
-            conn.close()
-## MAIN (Included for optional local development testing)
+        if cur: cur.close()
+        if conn: conn.close()
+        ## MAIN (Included for optional local development testing)
 if __name__ == '__main__':
     # This is for local development only. Gunicorn is typically used in production.
     app.run(debug=True, port=5000)

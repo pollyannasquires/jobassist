@@ -22,63 +22,88 @@
     </script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
+        /* Style for required file inputs */
+        input[type="file"]::file-selector-button {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     
     <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-12">
-        <div id="statusMessage" class="hidden fixed top-20 right-4 p-4 rounded-lg shadow-xl text-white z-50"></div>
+        <div id="statusMessage" class="hidden fixed top-20 right-4 p-4 rounded-lg shadow-xl text-white z-50 transition-all"></div>
 
         <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Record New Application</h1>
-        <p class="text-xl text-gray-600 mb-6">for: <span id="companyNameDisplay" class="font-semibold text-primary">Loading...</span></p>
+        <p class="text-xl text-gray-600 mb-6 flex items-center">
+            <i data-lucide="building-2" class="w-6 h-6 mr-2"></i>
+            Company: <span id="companyNameDisplay" class="font-bold ml-2 text-primary">Loading...</span>
+        </p>
 
-        <form id="newApplicationForm" class="bg-white p-6 sm:p-8 rounded-xl shadow-lg space-y-8">
-            
-            <fieldset class="border-b border-gray-200 pb-6">
-                <legend class="text-2xl font-bold text-gray-800 mb-4">1. Basic Information</legend>
-                <div class="space-y-4">
-                    <div>
-                        <label for="jobTitle" class="block text-sm font-medium text-gray-700">Job Title</label>
-                        <input type="text" id="jobTitle" name="jobTitle" required
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary">
-                        <p class="mt-1 text-xs text-gray-500">e.g., Senior Software Engineer</p>
-                    </div>
+        <form id="newApplicationForm" class="space-y-8">
 
-                    <div>
-                        <label for="dateApplied" class="block text-sm font-medium text-gray-700">Date Applied</label>
-                        <input type="date" id="dateApplied" name="dateApplied" required
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary">
-                    </div>
+            <fieldset class="border border-gray-200 p-6 rounded-xl shadow-sm space-y-6">
+                <legend class="text-xl font-bold text-gray-800 px-2">Application Details</legend>
+
+                <!-- Job Title -->
+                <div>
+                    <label for="jobTitle" class="block text-md font-medium text-gray-700 mb-1">Job Title / Role *</label>
+                    <input type="text" id="jobTitle" name="jobTitle" required 
+                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary">
+                </div>
+                
+                <!-- Application Date -->
+                <div>
+                    <label for="applicationDate" class="block text-md font-medium text-gray-700 mb-1">Date Applied *</label>
+                    <input type="date" id="applicationDate" name="applicationDate" required 
+                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary">
+                </div>
+                
+                <!-- Job Link (Optional) -->
+                <div>
+                    <label for="jobLink" class="block text-md font-medium text-gray-700 mb-1">Job Posting Link (Optional)</label>
+                    <input type="url" id="jobLink" name="jobLink" placeholder="e.g., https://linkedin.com/jobs/..."
+                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary">
+                </div>
+
+                <!-- Notes (Optional) -->
+                <div>
+                    <label for="notes" class="block text-md font-medium text-gray-700 mb-1">Notes (e.g., Referral, Interviewer names)</label>
+                    <textarea id="notes" name="notes" rows="4" 
+                              class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary"></textarea>
+                </div>
+                
+                <!-- Is Target Checkbox -->
+                <div class="flex items-center pt-4 border-t border-gray-100">
+                    <input id="isTarget" name="isTarget" type="checkbox" 
+                           class="h-5 w-5 text-primary border-gray-300 rounded focus:ring-primary">
+                    <label for="isTarget" class="ml-3 text-md font-medium text-gray-700">Mark as Target Company Application</label>
                 </div>
             </fieldset>
 
-            <fieldset class="space-y-6">
-                <legend class="text-2xl font-bold text-gray-800 mb-4">2. Required Documents</legend>
+            <fieldset class="border border-gray-200 p-6 rounded-xl shadow-sm space-y-6">
+                <legend class="text-xl font-bold text-gray-800 px-2">Documents (To be uploaded instantly)</legend>
+                <p class="text-sm text-gray-500 -mt-4 mb-4">You can upload a resume and optional files now, or add more later on the review page.</p>
 
-                <div class="space-y-4">
-                    <div class="border border-gray-200 p-4 rounded-lg">
-                        <label for="jobDescriptionFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
-                            <i data-lucide="file-text" class="w-5 h-5 mr-2 text-primary"></i> Job Description (PDF/DOCX)
-                        </label>
-                        <input type="file" id="jobDescriptionFile" name="JOB_DESCRIPTION" accept=".pdf,.docx" required
-                               class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
-                    </div>
-
+                <div class="space-y-6">
+                    <!-- Resume File -->
                     <div class="border border-gray-200 p-4 rounded-lg">
                         <label for="resumeFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
-                            <i data-lucide="user" class="w-5 h-5 mr-2 text-primary"></i> Resume (PDF/DOCX)
+                            <i data-lucide="file-text" class="w-5 h-5 mr-2 text-primary"></i> Resume / CV * (Required)
                         </label>
                         <input type="file" id="resumeFile" name="RESUME" accept=".pdf,.docx" required
-                               class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
+                           class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
                     </div>
 
+                    <!-- Cover Letter File -->
                     <div class="border border-gray-200 p-4 rounded-lg">
-                        <label for="assessmentFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
-                            <i data-lucide="clipboard-check" class="w-5 h-5 mr-2 text-primary"></i> Assessment Form (PDF/DOCX)
+                         <label for="coverLetterFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
+                            <i data-lucide="mail-open" class="w-5 h-5 mr-2 text-primary"></i> Cover Letter (Optional)
                         </label>
-                        <input type="file" id="assessmentFile" name="ASSESSMENT_FORM" accept=".pdf,.docx" required
-                               class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
+                         <input type="file" id="coverLetterFile" name="COVER_LETTER" accept=".pdf,.docx" 
+                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
                     </div>
+                    
+                    <!-- Other Files -->
                     <div class="border border-gray-200 p-4 rounded-lg">
                          <label for="otherFiles" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
                             <i data-lucide="folder" class="w-5 h-5 mr-2 text-primary"></i> Other Supporting Files (Optional, Multiple)
@@ -96,7 +121,22 @@
         </form>
     </main>
 
-    <script src="navbar.js"></script>
-    <script src="application_create.js"></script>
+    <!-- START: Script loading section -->
+
+    <!-- 1. CRITICAL FIX: Define the required Firebase/Canvas globals using 'var' -->
+    <script>
+        // Using 'var' ensures the variables are correctly hoisted and accessible 
+        // by subsequent modules, resolving the ReferenceError if the environment
+        // fails to provide them.
+        var __app_id = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        var __firebase_config = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        var __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    </script>
+    
+    <!-- 2. Load all scripts as modules -->
+    <script type="module" src="core-utils.js"></script> 
+    <script type="module" src="application_create.js"></script>
+
+    <!-- END: Script loading section -->
 </body>
 </html>

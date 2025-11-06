@@ -1,337 +1,375 @@
-// FILENAME: application_review.js | Handles application history viewing, document upload/download, and navigation
-// Incorporates fixes for API parsing, job title rendering, column ordering, and document upload payload fields.
+// FILENAME: application_review.js | Handles application history viewing, document upload/download, and now imports the Company Sidebar.
+
+// CRITICAL FIX: Import core utilities and firebase dependencies directly for use in this module
+import { fetchWithGuard, initializeServices, currentUserId, appId, db, isAuthReady } from './core-utils.js'; 
+import { collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"; 
+// IMPORT NEW REUSABLE SIDEBAR MODULE
+import { initSidebar } from './company_sidebar.js';
+
 
 // --- API Endpoints ---
 const APPLICATIONS_API_BASE = '/api/applications'; // GET /api/applications?company_id=<id> (Endpoint 11.0)
 const DOCUMENT_UPLOAD_API_BASE = '/api/application'; // For POST /api/application/<id>/documents (API 9.0)
 const DOCUMENT_DOWNLOAD_API_BASE = '/api/document'; // For GET /api/document/<id> (API 10.0)
 
-// --- DOM Elements ---
+// --- ENUMERATED TYPES (Document Types) ---
+const DOCUMENT_TYPES = [
+    { code: 'RESUME', name: 'Résumé/CV' },
+    { code: 'COVER_LETTER', name: 'Cover Letter' },
+    { code: 'OTHER', name: 'Other Document (Transcript, Portfolio, etc.)' }
+];
+
+// --- Status to styling mapping ---
+const STATUS_MAP = {
+    'NEW': { text: 'New', class: 'bg-blue-100 text-blue-800' },
+    'APPLIED': { text: 'Applied', class: 'bg-indigo-100 text-indigo-800' },
+    'INTERVIEWING': { text: 'Interviewing', class: 'bg-purple-100 text-purple-800' },
+    'OFFER': { text: 'Offer Received', class: 'bg-success text-emerald-800' },
+    'REJECTED': { text: 'Rejected', class: 'bg-red-100 text-red-800' },
+    'WITHDRAWN': { text: 'Withdrawn', class: 'bg-gray-100 text-gray-800' },
+};
+
+
+// --- Main Content DOM Elements ---
 const tableBody = document.getElementById('applicationsTableBody');
 const companyNameDisplay = document.getElementById('companyNameDisplay');
 const recordNewAppBtn = document.getElementById('recordNewAppBtn');
 const statusMessage = document.getElementById('statusMessage');
+
+// Modal Elements
 const documentUploadModal = document.getElementById('documentUploadModal');
 const documentUploadForm = document.getElementById('documentUploadForm');
-const modalApplicationTitle = document.getElementById('modalApplicationTitle');
-const uploadBtnText = document.getElementById('uploadBtnText');
-const uploadSpinner = document.getElementById('uploadSpinner');
+const modalApplicationTitle = document.getElementById('modalApplicationTitle'); 
+const modalApplicationId = document.getElementById('modalApplicationId');
+const docTypeSelect = document.getElementById('documentType');
+const fileInput = document.getElementById('documentFile');
 const uploadStatusMessage = document.getElementById('uploadStatusMessage');
-
-// Form elements specific to upload
-const uploadFileElement = document.getElementById('documentFile');
-const uploadTypeSelect = document.getElementById('documentTypeCode');
 
 // --- Global State ---
 let currentCompanyId = null;
-let currentCompanyName = 'Loading...';
-let currentApplicationIdForUpload = null;
-let allApplications = []; // Store applications for dynamic updates
 
-// --- Utility Functions for UI State ---
 
-/**
- * Sets the loading state for the upload button (disabling it and showing a spinner).
- * @param {boolean} isLoading
- */
-function setUploadLoading(isLoading) {
-    const submitBtn = document.getElementById('submitUploadBtn');
-    submitBtn.disabled = isLoading;
-    if (isLoading) {
-        uploadBtnText.textContent = 'Uploading...';
-        uploadSpinner.classList.remove('hidden');
-        uploadStatusMessage.classList.add('hidden');
-    } else {
-        uploadBtnText.textContent = 'Upload Document';
-        uploadSpinner.classList.add('hidden');
-    }
-}
+// ---------------------------------------------------------------------
+// --- MAIN APPLICATION REVIEW LOGIC -----------------------------------
+// ---------------------------------------------------------------------
 
 /**
- * Displays a status message in the upload modal.
- * @param {string} message - The message content.
- * @param {string} type - 'success' or 'error'.
+ * Helper function to format the application status for display.
  */
-function setUploadStatus(message, type) {
-    uploadStatusMessage.textContent = message;
-    uploadStatusMessage.classList.remove('hidden', 'text-error', 'text-success', 'bg-red-50', 'bg-green-50');
-    if (type === 'error') {
-        uploadStatusMessage.classList.add('text-error', 'bg-red-50');
-    } else {
-        uploadStatusMessage.classList.add('text-success', 'bg-green-50');
-    }
-}
-
-// --- Modal Control Functions (Exposed Globally) ---
-
-/**
- * Opens the document upload modal and sets the context (application ID).
- * @param {string} applicationId - UUID of the application.
- * @param {string} applicationTitle - Title of the application (Job Title or status).
- */
-function openUploadModal(applicationId, applicationTitle) {
-    currentApplicationIdForUpload = applicationId;
-    modalApplicationTitle.textContent = applicationTitle;
-    documentUploadForm.reset(); // Reset form on open
-    uploadStatusMessage.classList.add('hidden'); // Clear previous status
-    setUploadLoading(false); // Reset button state
-
-    documentUploadModal.classList.remove('hidden', 'opacity-0');
-    documentUploadModal.classList.add('opacity-100');
-    document.body.classList.add('overflow-hidden');
-}
-
-/**
- * Closes the document upload modal.
- */
-function closeUploadModal() {
-    documentUploadModal.classList.remove('opacity-100');
-    documentUploadModal.classList.add('opacity-0');
-    // Wait for transition before hiding completely
-    setTimeout(() => {
-        documentUploadModal.classList.add('hidden');
-        document.body.classList.remove('overflow-hidden');
-    }, 300);
-}
-
-// --- Upload Function (CRITICAL FIX) ---
-
-/**
- * Handles the document upload form submission, sending multipart/form-data.
- * This function is updated to use the required field names: 'document' and 'document_type_code'.
- */
-async function handleDocumentUpload(event) {
-    event.preventDefault();
-    setUploadStatus('', ''); // Clear previous status
-
-    // 1. Validation
-    if (!currentApplicationIdForUpload) {
-        setUploadStatus('Upload Failed: Missing application context ID.', 'error');
-        return;
-    }
-    if (uploadFileElement.files.length === 0) {
-        setUploadStatus('Upload Failed: Please select a file to upload.', 'error');
-        return;
-    }
-    if (!uploadTypeSelect.value) {
-        setUploadStatus('Upload Failed: Please select a Document Type.', 'error');
-        return;
-    }
-
-    // 2. UI State
-    setUploadLoading(true);
-
-    const formData = new FormData();
-    
-    // *** CRITICAL FIX 1: Use 'document' for the file content (as per Lessons Learned) ***
-    formData.append('document', uploadFileElement.files[0]);
-
-    // *** CRITICAL FIX 2: Use 'document_type_code' for the type (as per Lessons Learned) ***
-    formData.append('document_type_code', uploadTypeSelect.value);
-
-    // 3. API Call
-    const uploadUrl = `${DOCUMENT_UPLOAD_API_BASE}/${currentApplicationIdForUpload}/documents`;
-
-    try {
-        const response = await fetch(uploadUrl, {
-            method: 'POST',
-            // IMPORTANT: Do NOT set Content-Type header when using FormData, 
-            // the browser sets it automatically with the correct boundary.
-            body: formData,
-        });
-
-        if (response.ok) {
-            setUploadStatus('Document uploaded successfully! Please close this window to refresh the table.', 'success');
-            // Clear the file selection field after success
-            uploadFileElement.value = '';
-            // Re-fetch applications to update the table in the background
-            fetchApplications(currentCompanyId); 
-        } else {
-            const errorData = await response.json().catch(() => ({}));
-            const message = errorData.message || `HTTP Error ${response.status}.`;
-            setUploadStatus(`Upload Failed: ${message}`, 'error');
-            console.error('Document upload failed:', errorData);
-        }
-
-    } catch (error) {
-        setUploadStatus(`Upload Failed: Network or server error. ${error.message}`, 'error');
-        console.error('Document upload error:', error);
-    } finally {
-        setUploadLoading(false);
-    }
+function formatStatus(status) {
+    const map = STATUS_MAP[status] || { text: status, class: 'bg-gray-200 text-gray-800' };
+    return `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${map.class}">
+                ${map.text}
+            </span>`;
 }
 
 
-// --- Main Application Fetch and Render Logic ---
-
 /**
- * Handles the document download link click.
+ * Renders the list of documents and the upload link for a single application.
  */
-function handleDocumentDownload(documentId, originalFilename) {
-    // Basic security check (though the backend should enforce auth/ownership)
-    if (!documentId) {
-        console.error('Missing document ID for download.');
-        return;
-    }
+function renderDocumentLinks(documents, applicationId) {
+    let linksHtml = documents.map(doc => {
+        const docName = doc.original_filename || 'Document File';
+        const icon = doc.document_type === 'RESUME' ? 'file-text' : doc.document_type === 'COVER_LETTER' ? 'mail' : 'file';
 
-    const downloadUrl = `${DOCUMENT_DOWNLOAD_API_BASE}/${documentId}`;
-    
-    // NOTE: In a real environment, this should open in a new tab or trigger a download
-    // For this context, we will simply navigate to the URL.
-    window.location.href = downloadUrl;
+        // Use direct link to API endpoint with file_path and 'download' attribute
+        return `
+            <!-- Changed 'block' to 'flex items-center' to ensure tighter control over vertical spacing and better icon alignment -->
+            <a href="${DOCUMENT_DOWNLOAD_API_BASE}/${doc.file_path}"
+               download="${docName}"
+               class="flex items-center text-sm text-indigo-600 hover:text-indigo-800 hover:underline transition duration-150 truncate leading-tight"
+               title="Download ${docName}">
+               <span class="inline-block w-3 h-3 mr-1" data-lucide="${icon}"></span>
+               <span class="truncate">${docName}</span>
+            </a>
+        `;
+    }).join('');
+
+    // Add the "Upload New Document" button
+    linksHtml += `
+        <!-- Reduced vertical margin from 'mt-1' to 'mt-0.5' for tighter packing -->
+        <button type="button" 
+            onclick="openUploadModal('${applicationId}', '${applicationId.substring(0, 8)}...')"
+            class="mt-0.5 text-xs font-medium text-emerald-600 hover:text-emerald-800 flex items-center transition duration-150">
+            <span class="inline-block w-3 h-3 mr-1" data-lucide="upload"></span>
+            Upload Document
+        </button>
+    `;
+
+    // The container uses a plain div to avoid adding external spacing
+    return `<div>${linksHtml}</div>`; 
 }
 
-/**
- * Formats a date string (YYYY-MM-DD) into a more readable format.
- * @param {string} dateString
- * @returns {string} Formatted date string or a default value.
- */
-function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-    try {
-        const [year, month, day] = dateString.split('-');
-        return `${year}/${month}/${day}`;
-    } catch (e) {
-        return dateString; // Return original if parsing fails
-    }
-}
 
 /**
- * Renders the list of applications into the table.
- * @param {Array} applications
+ * Renders the application history table rows.
  */
-function renderApplications(applications) {
+function renderApplicationTable(applications) {
     if (!tableBody) return;
 
     if (!applications || applications.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-gray-500">No applications recorded yet for ${currentCompanyName}.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-gray-500">No applications recorded for this company.</td></tr>`;
         return;
     }
 
     const rowsHtml = applications.map(app => {
-        const cleanDate = formatDate(app.date_applied);
+        const documents = app.documents || [];
         
-        // Fix: Use optional chaining to safely access nested job title and provide a fallback
-        const jobTitle = app.job_title_info?.title_name || 'N/A';
-        
-        // Render documents attached to this application
-        const documentsHtml = (app.documents || [])
-            .map(doc => `
-                <span class="inline-flex items-center text-xs font-medium bg-indigo-100 text-primary rounded-full px-2.5 py-0.5 mr-2 mb-1 cursor-pointer hover:bg-indigo-200 transition-colors"
-                      onclick="handleDocumentDownload('${doc.document_id}', '${doc.original_filename}')">
-                    <i data-lucide="file-text" class="w-3 h-3 mr-1"></i>
-                    ${doc.original_filename} (${doc.document_type})
-                </span>
-            `).join('');
+        // Format the Date Applied
+        const dateApplied = new Date(app.date_applied).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
 
+        // Generate the document links column
+        const documentCellHtml = renderDocumentLinks(documents, app.application_id);
 
         return `
-            <tr class="border-b hover:bg-gray-50 transition-colors">
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${cleanDate}</td>
-                <td class="px-6 py-4 text-sm text-gray-500">${jobTitle}</td>
-                <td class="px-6 py-4 text-sm font-semibold 
-                    ${app.current_status === 'OFFER' ? 'text-success' : 
-                      app.current_status === 'REJECTED' ? 'text-error' : 'text-primary'}">
-                    ${app.current_status}
+            <tr class="hover:bg-gray-50 transition duration-100">
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <div class="font-medium">${dateApplied}</div>
+                    <div class="text-xs text-gray-400" title="Application ID">${app.application_id.substring(0, 8)}...</div>
                 </td>
-                <td class="px-6 py-4 text-sm">
-                    <div class="flex flex-wrap items-center">
-                        ${documentsHtml}
-                        <button class="text-primary hover:text-indigo-700 text-xs font-semibold px-2 py-1 rounded-full border border-primary/50 hover:border-indigo-700 transition-colors mt-1"
-                                onclick="openUploadModal('${app.application_id}', '${jobTitle} on ${cleanDate}')">
-                            <i data-lucide="upload-cloud" class="w-3 h-3 inline-block mr-1"></i>
-                            Add Document
-                        </button>
-                    </div>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    ${app.job_title_info?.title_name || 'N/A Job Title'}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    ${formatStatus(app.current_status)}
+                </td>
+                <!-- Added 'whitespace-normal' here to ensure the cell content wraps if necessary, and it receives the document links -->
+                <td class="px-6 py-4 whitespace-normal text-sm text-gray-500">
+                    ${documentCellHtml}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
+                    <a href="#" class="text-indigo-600 hover:text-indigo-900 transition duration-150">Edit</a>
                 </td>
             </tr>
         `;
     }).join('');
 
     tableBody.innerHTML = rowsHtml;
-    // Recreate icons after rendering new HTML content
+    // Re-initialize Lucide icons for dynamically added content
     if (typeof lucide !== 'undefined') {
         lucide.createIcons();
     }
 }
 
-/**
- * Fetches application data for the current company ID.
- * @param {number} companyId
- */
-async function fetchApplications(companyId) {
-    statusMessage.textContent = 'Loading applications...';
-    statusMessage.classList.remove('hidden', 'text-error');
 
-    if (!companyId) {
-        statusMessage.textContent = 'Error: No Company ID specified.';
-        statusMessage.classList.add('text-error');
-        return;
+/**
+ * Fetches application history for a specific company and renders the table.
+ * This function must be exported/globally accessible as it is called by the sidebar navigation.
+ */
+export async function fetchApplications(companyId, companyName) {
+    if (!companyNameDisplay || !tableBody) return;
+
+    currentCompanyId = companyId; // Set current company ID state
+    companyNameDisplay.textContent = companyName;
+    document.getElementById('pageTitle').textContent = `${companyName} Applications | JobAssist`;
+    
+    // Clear previous results and show loading indicator
+    tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-indigo-400">
+        <div class="flex justify-center items-center">
+            <div class="animate-spin w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full mr-3"></div>
+            <span>Loading applications...</span>
+        </div>
+    </td></tr>`;
+
+    // Ensure the Record New Application button is visible
+    if (recordNewAppBtn) {
+        recordNewAppBtn.style.display = 'block';
     }
 
-    const url = `${APPLICATIONS_API_BASE}?company_id=${companyId}`;
-
     try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
+        // API 11.0: GET /api/applications?company_id=<id>
+        const apiUrl = `${APPLICATIONS_API_BASE}?company_id=${companyId}`;
+        const data = await fetchWithGuard(apiUrl, 'GET', 'fetch applications'); 
         
-        // Fix: Correctly extract the nested array from the API response
-        allApplications = data.applications || [];
-
-        renderApplications(allApplications);
-        
-        // Hide status message on successful load
-        statusMessage.classList.add('hidden');
+        renderApplicationTable(data.applications);
 
     } catch (error) {
-        console.error('Error fetching applications:', error);
-        statusMessage.textContent = `Failed to load applications. ${error.message}`;
-        statusMessage.classList.remove('hidden');
-        statusMessage.classList.add('text-error');
-        tableBody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-error">Failed to load application data.</td></tr>`;
+        console.error("Failed to fetch applications:", error);
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-error">Error loading applications: ${error.message}.</td></tr>`;
     }
 }
 
 
-// --- Initialization ---
+// --- Document Upload Modal Functions ---
 
-document.addEventListener('DOMContentLoaded', () => {
-    // 1. Get Company ID from URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const companyIdParam = urlParams.get('companyId');
+/**
+ * Opens the document upload modal and sets the context.
+ */
+function openUploadModal(applicationId, displayId) {
+    if (!documentUploadModal || !modalApplicationTitle || !modalApplicationId || !docTypeSelect || !uploadStatusMessage) {
+        console.error("Modal elements are missing. Cannot open upload modal.");
+        return; 
+    }
+    
+    // Set the application context in the modal
+    modalApplicationTitle.textContent = `Upload Document for App ${displayId}`;
+    modalApplicationId.value = applicationId; // Store ID in a hidden input
+    
+    // Clear previous state and populate document types
+    documentUploadForm.reset();
+    uploadStatusMessage.textContent = '';
+    uploadStatusMessage.classList.add('hidden');
 
-    if (companyIdParam) {
-        currentCompanyId = parseInt(companyIdParam, 10);
+    // Populate the document type dropdown (if not already populated or reset)
+    if (docTypeSelect.options.length === 0 || docTypeSelect.options[0].value === "") {
+        docTypeSelect.innerHTML = DOCUMENT_TYPES.map(type => 
+            `<option value="${type.code}">${type.name}</option>`
+        ).join('');
+    }
+
+    // Show modal
+    documentUploadModal.classList.remove('opacity-0', 'pointer-events-none');
+    documentUploadModal.querySelector('.max-w-lg').classList.remove('translate-y-4'); // Trigger transition
+}
+
+/**
+ * Closes the document upload modal.
+ */
+function closeUploadModal() {
+    if (!documentUploadModal) return;
+    
+    // Hide modal with transition effects
+    documentUploadModal.querySelector('.max-w-lg').classList.add('translate-y-4');
+    documentUploadModal.classList.add('opacity-0');
+    
+    setTimeout(() => {
+        documentUploadModal.classList.add('pointer-events-none');
+    }, 300); 
+}
+
+
+/**
+ * Handles the form submission for document upload.
+ */
+async function handleDocumentUpload(event) {
+    event.preventDefault(); 
+    
+    const applicationId = modalApplicationId.value;
+    const documentType = docTypeSelect.value;
+    const file = fileInput.files[0];
+
+    if (!applicationId || !documentType || !file) {
+        uploadStatusMessage.textContent = 'ERROR: Please select a document type and a file before uploading.';
+        uploadStatusMessage.classList.remove('hidden', 'text-indigo-600', 'text-success');
+        uploadStatusMessage.classList.add('text-error', 'p-2', 'bg-red-50', 'font-bold'); 
+        return;
+    }
+
+    uploadStatusMessage.textContent = 'Uploading...';
+    uploadStatusMessage.classList.remove('hidden', 'text-error', 'text-success', 'p-2', 'bg-red-50', 'font-bold');
+    document.getElementById('uploadSubmitBtn').disabled = true;
+
+    try {
+        const formData = new FormData();
+        formData.append('document', file);
+        formData.append('document_type_code', documentType); 
+
+        // API 9.0: POST /api/application/<id>/documents
+        const apiUrl = `${DOCUMENT_UPLOAD_API_BASE}/${applicationId}/documents`;
         
-        // 2. Set Page Title and Display Name
-        const companyNameParam = urlParams.get('companyName');
-        if (companyNameParam) {
-             currentCompanyName = decodeURIComponent(companyNameParam);
-             companyNameDisplay.textContent = currentCompanyName;
-             document.getElementById('pageTitle').textContent = `Application Review: ${currentCompanyName} | JobAssist`;
-        } else {
-             companyNameDisplay.textContent = `ID ${currentCompanyId}`;
+        // Use standard fetch for FormData upload (CRITICAL: DO NOT use fetchWithGuard or set Content-Type)
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            body: formData, 
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+             throw new Error(data.message || `API Error (${response.status}): Document upload failed.`);
         }
 
-        // Bug Fix 5: Inform the sidebar component about the active company ID
-        if (typeof window.setActiveCompanyIdAndRerender === 'function') {
-            window.setActiveCompanyIdAndRerender(currentCompanyId);
-        }
+        uploadStatusMessage.textContent = `Upload successful! Document ID: ${data.document_id}`;
+        uploadStatusMessage.classList.remove('text-indigo-600', 'text-error');
+        uploadStatusMessage.classList.add('text-success', 'p-2', 'bg-green-50');
+        
+        setTimeout(() => {
+            closeUploadModal();
+            // Refresh the application list
+            const companyName = companyNameDisplay.textContent;
+            if(currentCompanyId) {
+                fetchApplications(currentCompanyId, companyName);
+            }
+        }, 1500);
 
-        // 3. Fetch data
-        fetchApplications(currentCompanyId);
 
-        // 4. Attach form submission handler
+    } catch (error) {
+        console.error("Document upload failed:", error);
+        uploadStatusMessage.textContent = `Upload failed: ${error.message}`;
+        uploadStatusMessage.classList.remove('text-indigo-600', 'text-success');
+        uploadStatusMessage.classList.add('text-error', 'p-2', 'bg-red-50', 'font-bold');
+    } finally {
+        document.getElementById('uploadSubmitBtn').disabled = false;
+    }
+}
+
+
+/**
+ * Handles the click on the "Record New Application" button.
+ */
+function handleRecordNewApplication(event) {
+    if (event) {
+        event.preventDefault(); 
+    }
+
+    if (!currentCompanyId) {
+        // Show error message if no company is selected
+        statusMessage.textContent = 'Please select a company from the sidebar first to record an application.';
+        statusMessage.className = 'p-4 rounded-lg text-sm mb-4 bg-red-100 text-red-800 block';
+        setTimeout(() => statusMessage.classList.add('hidden'), 5000);
+        return;
+    }
+
+    // Get the full company name from the display element
+    const companyName = companyNameDisplay.textContent;
+
+    // Construct the URL and navigate to the creation page, passing context in the URL
+    const newUrl = `application_create.html?companyId=${currentCompanyId}&companyName=${encodeURIComponent(companyName)}`;
+    window.location.href = newUrl;
+}
+
+
+// ---------------------------------------------------------------------
+// --- INITIALIZATION --------------------------------------------------
+// ---------------------------------------------------------------------
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // 0. Initialize services (Firebase/Auth)
+    await initializeServices();
+    
+    // 1. Attach main button listeners
+    if (recordNewAppBtn) {
+        recordNewAppBtn.addEventListener('click', handleRecordNewApplication);
+    }
+    if (documentUploadForm) {
         documentUploadForm.addEventListener('submit', handleDocumentUpload);
+    }
+    
+    // 2. Check URL parameters for the currently selected company
+    const urlParams = new URLSearchParams(window.location.search);
+    const companyId = urlParams.get('companyId');
+    const companyName = urlParams.get('companyName');
+    
+    // 3. Initialize the REUSABLE SIDEBAR
+    // This is the key integration point!
+    initSidebar({ 
+        activeCompanyId: companyId,
+        targetPage: 'application_review.html' // Tell the sidebar where to navigate
+    });
 
+    // 4. If a company is selected, load its applications
+    if (companyId && companyName) {
+        // Fetch and render applications for the selected company
+        fetchApplications(companyId, decodeURIComponent(companyName));
     } else {
-        // Error state handling
+        // Error state: Missing company context. 
         companyNameDisplay.textContent = 'N/A';
-        tableBody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-error">Error: Missing Company ID in URL.</td></tr>`;
-        document.getElementById('pageTitle').textContent = `Error | JobAssist`;
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-error">Error: Missing Company ID in URL. Please select a company from the sidebar to view history.</td></tr>`;
+        document.getElementById('pageTitle').textContent = `Select Company | JobAssist`;
 
         if (recordNewAppBtn) {
             recordNewAppBtn.style.display = 'none';
@@ -344,13 +382,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// Expose functions globally for inline HTML handlers (e.g., onclick attributes)
+
+// --- Expose functions globally for inline HTML handlers ---
+// fetchApplications must be exposed so the sidebar can trigger it when a company is clicked.
 window.openUploadModal = openUploadModal;
 window.closeUploadModal = closeUploadModal;
-window.handleDocumentDownload = handleDocumentDownload;
-
-// Define the global callback function required by company_sidebar.js for navigation
-window.onCompanySelect = (companyId, companyName, linkElement) => {
-    // Navigate to the review page for the newly selected company
-    window.location.href = `application_review.html?companyId=${companyId}&companyName=${encodeURIComponent(companyName)}`;
-};
+window.handleRecordNewApplication = handleRecordNewApplication; 
+window.fetchApplications = fetchApplications;

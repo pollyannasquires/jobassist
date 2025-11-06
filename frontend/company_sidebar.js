@@ -1,18 +1,43 @@
-// FILENAME: company_sidebar.js | Reusable logic for fetching and rendering the Company Profiles sidebar
+// FILENAME: company_sidebar.js | Reusable logic for fetching and rendering the Company Profiles sidebar.
 
-// --- API Endpoints ---
-const API_COMPANIES = '/api/companies';
+// Imports the fetch guard utility
+import { fetchWithGuard } from './core-utils.js'; 
+
+// --- CONFIGURATION ---
+// Configuration object allows easy modification of API endpoint, 
+// default navigation target, and styling classes.
+const CONFIG = {
+    // UPDATED: Using API 14.0 /api/sidebar
+    API_URL: '/api/sidebar', 
+    // Default page to navigate to when a company is selected (used for URL construction)
+    TARGET_PAGE: 'application_review.html', 
+    styles: {
+        // Tailwind classes for the active selected company
+        activeBg: 'bg-indigo-600', 
+        activeText: 'text-white',
+        // Tailwind classes for target companies (is_target=true)
+        targetText: 'text-white font-bold', 
+        // Tailwind classes for non-target companies
+        nonTargetText: 'text-gray-300', 
+        loadingText: 'Loading...',
+        errorText: 'Failed to load companies.'
+    }
+};
 
 // --- DOM Elements ---
-const sidebarListElement = document.getElementById('companyList');
-const sidebarSearchFilter = document.getElementById('sidebarSearchFilter');
-const sidebarTargetFilter = document.getElementById('sidebarTargetFilter');
+let sidebarListElement = null;
+let sidebarSearchFilter = null;
+let sidebarTargetFilter = null;
 
 // --- Global State ---
-let allCompanies = []; // Full, un-filtered list of companies
-let currentActiveCompanyId = null; // NEW: Track the currently active ID internally
+let allCompanies = [];
+let currentActiveCompanyId = null;
+let currentTargetPage = CONFIG.TARGET_PAGE;
 
-// --- Utility Functions ---
+
+// ---------------------------------------------------------------------
+// --- UTILITY FUNCTIONS -----------------------------------------------
+// ---------------------------------------------------------------------
 
 /**
  * Utility to debounce function calls.
@@ -26,158 +51,158 @@ function debounce(func, delay) {
 }
 
 /**
- * Renders the filtered list of companies into the sidebar.
+ * Renders the filtered list of companies into the sidebar list element.
  * @param {Array} companies - The list of companies to render.
- * @param {number} activeCompanyId - The ID of the currently selected company, if any.
  */
-function renderCompanyList(companies, activeCompanyId = null) {
+function renderCompanyList(companies) {
     if (!sidebarListElement) return;
 
+    const { styles } = CONFIG;
+
     if (!companies || companies.length === 0) {
-        sidebarListElement.innerHTML = `<li class="p-4 text-sm text-gray-500 italic">No companies found matching criteria.</li>`;
+        const searchVal = sidebarSearchFilter ? sidebarSearchFilter.value.toLowerCase() : '';
+        const targetVal = sidebarTargetFilter ? sidebarTargetFilter.value : 'ALL';
+        
+        if (allCompanies.length > 0 && (searchVal || targetVal !== 'ALL')) {
+            sidebarListElement.innerHTML = '<div class="px-4 py-2 text-sm text-gray-400">No companies found matching criteria.</div>';
+        } else {
+             sidebarListElement.innerHTML = '<div class="px-4 py-2 text-sm text-gray-400">No companies found in the system.</div>';
+        }
         return;
     }
 
     const html = companies.map(company => {
-        // FIX: Ensure the correct class is applied based on the ID passed
-        const isActive = company.company_id === activeCompanyId ? 'active' : ''; 
-        const targetClass = company.target_interest ? 'text-primary' : 'text-gray-500';
+        const isActive = company.company_id == currentActiveCompanyId; // Use == for mixed types (ID can be string/number)
+        const isTarget = company.is_target === true;
+
+        const targetClass = isTarget ? styles.targetText : styles.nonTargetText;
+        // Use a background and text class for the active item
+        const activeClasses = isActive ? `${styles.activeBg} ${styles.activeText}` : 'hover:bg-gray-700';
         
+        // UPDATED: Using company.company_name_clean for display and data-name
         return `
-            <li class="p-0">
-                <a href="#" class="company-name-link block p-4 flex items-center justify-between text-gray-700 hover:bg-indigo-50 ${isActive}" 
-                   data-id="${company.company_id}" 
-                   data-name="${company.company_name_clean}">
-                    <div class="flex items-center">
-                        <div class="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-100 text-primary text-xs font-bold mr-3">
-                            ${company.company_name_clean.charAt(0).toUpperCase()}
-                        </div>
-                        <span class="text-sm font-medium truncate">${company.company_name_clean}</span>
-                    </div>
-                    ${company.target_interest ? `<i data-lucide="zap" class="w-4 h-4 ${targetClass} ml-2"></i>` : ''}
-                </a>
-            </li>
+            <a href="#" class="company-name-link ${activeClasses} ${targetClass} 
+               truncate px-4 py-2 flex items-center transition duration-150 rounded-lg mx-2" 
+               data-id="${company.company_id}" 
+               data-name="${company.company_name_clean}"
+               title="${company.company_name_clean}">
+                <span data-lucide="${isTarget ? 'star' : 'briefcase'}" class="w-4 h-4 mr-2 flex-shrink-0"></span>
+                <span class="truncate">${company.company_name_clean}</span>
+            </a>
         `;
     }).join('');
 
     sidebarListElement.innerHTML = html;
-
-    // Call lucide.createIcons() after updating innerHTML in case of success or failure
     if (typeof lucide !== 'undefined') {
         lucide.createIcons();
     }
 }
 
 /**
- * Applies the current filters and re-renders the list.
+ * Filters the main company list based on current filter state and re-renders.
  */
 function filterAndRenderCompanies() {
-    if (!sidebarSearchFilter || !sidebarTargetFilter) return;
-
-    const searchTerm = sidebarSearchFilter.value.toLowerCase();
-    const targetFilterValue = sidebarTargetFilter.value;
+    const searchTerm = sidebarSearchFilter ? sidebarSearchFilter.value.toLowerCase() : '';
+    const targetFilter = sidebarTargetFilter ? sidebarTargetFilter.value : 'ALL'; 
 
     let filteredCompanies = allCompanies.filter(company => {
-        // 1. Search Filter
-        const nameMatches = company.company_name_clean.toLowerCase().includes(searchTerm);
+        // CRITICAL: Filter against company_name_clean
+        if (!company || typeof company.company_name_clean !== 'string') {
+            return false;
+        }
         
-        // 2. Target Filter
-        let targetMatches = true;
-        if (targetFilterValue === 'target') {
-            targetMatches = company.target_interest;
-        } else if (targetFilterValue === 'non-target') {
-            targetMatches = !company.target_interest;
+        const matchesSearch = company.company_name_clean.toLowerCase().includes(searchTerm);
+        
+        let matchesTarget = true;
+        if (targetFilter === 'TARGET') {
+            matchesTarget = company.is_target === true;
+        } else if (targetFilter === 'NON_TARGET') {
+            matchesTarget = company.is_target === false;
         }
 
-        return nameMatches && targetMatches;
+        return matchesSearch && matchesTarget;
     });
 
-    // FIX: Pass the internal active ID state to ensure the highlight is maintained.
-    renderCompanyList(filteredCompanies, currentActiveCompanyId);
+    // Sort alphabetically by company_name_clean
+    filteredCompanies.sort((a, b) => a.company_name_clean.localeCompare(b.company_name_clean));
+
+    renderCompanyList(filteredCompanies);
 }
 
 const debouncedFilterAndRender = debounce(filterAndRenderCompanies, 300);
 
 /**
- * Fetches the initial company data from the API and renders the list.
+ * Fetches all company profiles from the API and initializes the display.
  */
 async function fetchCompanies() {
-    if (!sidebarListElement) return;
-
-    sidebarListElement.innerHTML = `<li class="p-4 text-sm text-center text-gray-500">Loading companies...</li>`;
+    if (sidebarListElement) {
+        sidebarListElement.innerHTML = `<div class="px-4 py-2 text-sm text-indigo-400 flex items-center"><span class="animate-spin w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full mr-2"></span> ${CONFIG.styles.loadingText}</div>`;
+    }
 
     try {
-        const response = await fetch(API_COMPANIES);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
+        const data = await fetchWithGuard(CONFIG.API_URL, 'GET', 'fetch sidebar company list'); 
+
+        allCompanies = Array.isArray(data.companies) ? data.companies : [];
         
-        // Handle API response format (assuming it's an array of companies directly)
-        if (Array.isArray(data)) {
-             allCompanies = data;
-        } else if (data && Array.isArray(data.companies)) {
-             allCompanies = data.companies; // Fallback for nested array if API changes
-        } else {
-             allCompanies = [];
-        }
-        
-        // Use the internally tracked ID for initial render
         filterAndRenderCompanies();
+
     } catch (error) {
-        console.error('Error fetching companies:', error);
-        sidebarListElement.innerHTML = `<li class="p-4 text-sm text-error italic">Failed to load companies: ${error.message}</li>`;
+        console.error("Failed to fetch companies:", error);
+        if (sidebarListElement) {
+            sidebarListElement.innerHTML = `<div class="px-4 py-2 text-sm text-error">${CONFIG.styles.errorText}</div>`;
+        }
     }
 }
 
-// --- Exposed Functions for Host Page (application_review.js) ---
 
 /**
- * Exposes a method for the host page to set the active company ID
- * and trigger a re-render to ensure the visual state is correct.
- * This is used when a company is clicked OR when the page loads from a URL param.
- * @param {number|null} companyId - The ID of the company to highlight.
+ * Handles the click event on a company link, constructing the correct URL.
  */
-window.setActiveCompanyIdAndRerender = (companyId) => {
-    // 1. Update internal state
-    currentActiveCompanyId = companyId;
-    
-    // 2. Re-render the list using the current filters and the new active ID
-    filterAndRenderCompanies();
-};
-
-// --- Initialization and Event Listeners ---
-
-document.addEventListener('DOMContentLoaded', () => {
-    // Check for required elements before proceeding
-    if (!sidebarListElement || !sidebarSearchFilter || !sidebarTargetFilter) {
-        console.error("Required sidebar DOM elements not found. Initialization aborted.");
-        return; 
+function handleCompanyLinkClick(event) {
+    const link = event.target.closest('.company-name-link');
+    if (link) {
+        event.preventDefault(); 
+        
+        const companyId = link.getAttribute('data-id');
+        const companyName = link.getAttribute('data-name');
+        
+        // Navigate to the target page, maintaining compatibility via URL params
+        const newUrl = `${currentTargetPage}?companyId=${companyId}&companyName=${encodeURIComponent(companyName)}`;
+        window.location.href = newUrl;
     }
+}
 
-    // 1. Initial Data Load
+// ---------------------------------------------------------------------
+// --- PUBLIC API (Initialization) -------------------------------------
+// ---------------------------------------------------------------------
+
+/**
+ * Initializes the Company Sidebar component.
+ * @param {object} options - Configuration options.
+ * @param {string} [options.activeCompanyId] - The ID of the currently selected company (read from URL).
+ * @param {string} [options.targetPage] - The page to navigate to when a link is clicked (e.g., 'application_review.html').
+ */
+export function initSidebar(options = {}) {
+    // 1. Set global state from options
+    currentActiveCompanyId = options.activeCompanyId || null;
+    currentTargetPage = options.targetPage || CONFIG.TARGET_PAGE;
+
+    // 2. Perform DOM lookups
+    sidebarListElement = document.getElementById('companyList');
+    sidebarSearchFilter = document.getElementById('sidebarSearchFilter');
+    sidebarTargetFilter = document.getElementById('sidebarTargetFilter');
+
+    // CRITICAL GUARD: Ensure required elements exist
+    if (!sidebarListElement || !sidebarSearchFilter || !sidebarTargetFilter) {
+        console.error("Sidebar initialization failed: Missing required DOM elements (companyList, sidebarSearchFilter, or sidebarTargetFilter).");
+        return;
+    }
+    
+    // 3. Attach Event Listeners
+    sidebarListElement.addEventListener('click', handleCompanyLinkClick);
+    sidebarSearchFilter.addEventListener('input', debouncedFilterAndRender);
+    sidebarTargetFilter.addEventListener('change', filterAndRenderCompanies);
+    
+    // 4. Fetch and render initial data
     fetchCompanies();
-    
-    // 2. Event Listeners for Filters
-    sidebarSearchFilter.addEventListener('input', () => debouncedFilterAndRender());
-    sidebarTargetFilter.addEventListener('change', () => filterAndRenderCompanies());
-    
-    // 3. Click Listener on the List
-    sidebarListElement.addEventListener('click', (event) => {
-        const link = event.target.closest('.company-name-link');
-        if (link) {
-            event.preventDefault();
-            const companyId = parseInt(link.getAttribute('data-id'), 10);
-            const companyName = link.getAttribute('data-name');
-            
-            // Call the exposed setter function to manage the highlight internally
-            window.setActiveCompanyIdAndRerender(companyId);
-
-            // Check if the host page has defined the callback function
-            if (typeof window.onCompanySelect === 'function') {
-                // application_review.js handles loading the main content
-                window.onCompanySelect(companyId, companyName); 
-            }
-        }
-    });
-});
+}
