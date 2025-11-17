@@ -10,7 +10,7 @@ const CONFIG = {
     // UPDATED: Using API 14.0 /api/sidebar
     API_URL: '/api/sidebar', 
     // Default page to navigate to when a company is selected (used for URL construction)
-    TARGET_PAGE: 'application_review.html', 
+    TARGET_PAGE: 'management.html', 
     styles: {
         // Tailwind classes for the active selected company
         activeBg: 'bg-indigo-600', 

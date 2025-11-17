@@ -11,6 +11,9 @@ import io # Used in download_document logic (not strictly needed if using send_f
 import mimetypes # <--- endpoint 9: Required for guess_extension (fixes NameError)
 from functools import wraps
 import logging
+import traceback # <--- CRITICAL FIX 2: Ensure traceback is imported
+import sys # <-- NEW: Import sys for robust error logging
+
 
 app = Flask(__name__)
 
@@ -345,7 +348,8 @@ def requires_auth(f):
         # in this temporary setup.
         return f(*args, **kwargs)
     return decorated
-# --- END OF CORRECTED AUTHENTICATION BLOCK ---# --- API Endpoints ---
+# --- END OF CORRECTED AUTHENTICATION BLOCK ---
+# --- API Endpoints ---
 
 @app.route('/')
 def index():
@@ -387,6 +391,7 @@ def get_companies():
     finally:
         if conn:
             conn.close()
+
 
 # ----------------------------------------------------------------------
 # 2. GET NEXT COMPANY (Used by Data Standardization Workflow)
@@ -435,7 +440,10 @@ def get_next_company():
         if conn:
             conn.close()
 
-
+# ----------------------------------------------------------------------
+# 3. COMPANY UPDATE API: PUT /api/companies/<int:company_id>
+# FIX: REMOVED REFERENCE TO "updated_by_user_id" from the SQL query.
+# ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
 # 3. GET SINGLE COMPANY PROFILE (Detail View) - /api/companies/<int:company_id> GET
 # ----------------------------------------------------------------------
@@ -450,7 +458,7 @@ def get_company_profile(company_id):
         # SQL to retrieve a single company profile by its ID
         cur.execute(
             """
-            SELECT company_id, company_name_clean, target_interest, size_employees, annual_revenue, revenue_scale, headquarters 
+            SELECT company_id, company_name_clean, target_interest, size_employees, annual_revenue, revenue_scale, headquarters, notes 
             FROM companies 
             WHERE company_id = %s;
             """,
@@ -486,207 +494,320 @@ def get_company_profile(company_id):
 
 # ----------------------------------------------------------------------
 # 4. UPDATE SINGLE COMPANY PROFILE (Management View) - /api/companies/<int:company_id> PUT
+# FIX: EXPANDED THE SQL QUERY TO UPDATE ALL PAYLOAD FIELDS
 # ----------------------------------------------------------------------
-@app.route('/api/company/<uuid:company_id>', methods=['PUT'])
-def update_company_profile(company_id):
-    # This function is assumed to be fully implemented and correct based on previous context.
-    # It allows updating fields like target_interest, size_employees, etc.
+@app.route('/api/companies/<int:company_id>', methods=['PUT'])
+@authenticate_request()
+def update_company(company_id):
+    """Endpoint 4.0: Updates an existing company's standardization and details, including notes."""
     data = request.get_json()
-    if not data:
-        return jsonify({"status": "error", "message": "Invalid JSON input."}), 400
-
-    # In a real app, we'd check user ownership here. Using MOCK_USER_ID for now.
-    
     conn = None
+    cur = None
+
+    # 1. Input Validation (Ensure at least the key identifier is present)
+    if 'company_name_clean' not in data:
+        return jsonify({
+            "status": "error",
+            "message": "Missing required field: company_name_clean"
+        }), 400
+
+    # 2. Extract all updatable fields, now including 'notes'
+    company_name_clean = data.get('company_name_clean')
+    headquarters = data.get('headquarters')
+    size_employees = data.get('size_employees')
+    annual_revenue = data.get('annual_revenue')
+    revenue_scale = data.get('revenue_scale')
+    target_interest = data.get('target_interest', False)
+    # NEW: Extract the notes field. Use None if not present in payload.
+    notes = data.get('notes') 
+    
     try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        conn, cur = get_db_cursor()
+        if conn is None:
+            return jsonify({"status": "error", "message": "Database connection failed"}), 500
         
-        updates = []
-        values = []
-        
-        # Build the dynamic SQL query
-        if 'target_interest' in data:
-            updates.append("target_interest = %s")
-            values.append(data['target_interest'])
-        if 'size_employees' in data:
-            updates.append("size_employees = %s")
-            values.append(data['size_employees'])
-        if 'annual_revenue' in data:
-            updates.append("annual_revenue = %s")
-            values.append(data['annual_revenue'])
-        if 'revenue_scale' in data:
-            updates.append("revenue_scale = %s")
-            values.append(data['revenue_scale'])
-        if 'headquarters' in data:
-            updates.append("headquarters = %s")
-            values.append(data['headquarters'])
-            
-        if not updates:
-            return jsonify({"status": "warning", "message": "No fields provided for update."}), 200
+        # 3. Check if the company exists
+        cur.execute("SELECT company_id FROM companies WHERE company_id = %s", (company_id,))
+        if cur.fetchone() is None:
+            return jsonify({
+                "status": "error",
+                "message": f"Update failed. Company ID {company_id} not found."
+            }), 404
 
-        # Append company_id to values list for the WHERE clause
-        values.append(company_id)
-        
-        update_query = f"UPDATE companies SET {', '.join(updates)} WHERE company_id = %s RETURNING *;"
-        
-        cur.execute(update_query, tuple(values))
-        updated_company = cur.fetchone()
-        
-        if updated_company is None:
-            conn.rollback()
-            return jsonify({"status": "error", "message": "Company not found or unauthorized to update."}), 404
-
+        # 4. Execute the Expanded Update Query, now including notes
+        sql_update = """
+            UPDATE companies 
+            SET 
+                company_name_clean = %s, 
+                headquarters = %s,
+                size_employees = %s,
+                annual_revenue = %s,
+                revenue_scale = %s,
+                target_interest = %s,
+                notes = %s  -- NEW: Added notes column
+            WHERE company_id = %s;
+        """
+        # Ensure the order of parameters matches the SQL statement above
+        cur.execute(sql_update, (
+            company_name_clean, 
+            headquarters, 
+            size_employees, 
+            annual_revenue, 
+            revenue_scale, 
+            target_interest, 
+            notes,            # NEW: Inserted notes parameter
+            company_id
+        ))
         conn.commit()
+
+        # 5. Success Response
         return jsonify({
             "status": "success",
-            "message": "Company profile updated successfully.",
-            "updated_data": dict(updated_company)
+            "message": f"Company ID {company_id} updated successfully.",
+            "company_id": company_id
         }), 200
 
     except psycopg2.Error as e:
-        if conn:
-            conn.rollback()
-        print(f"PostgreSQL Error in update_company_profile: {e}")
-        return jsonify({"status": "error", "message": "Database error during company update."}), 500
+        if conn: conn.rollback()
+        error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in update_company: {error_detail}")
+        return jsonify({"status": "error", "message": f"Database error: {error_detail}"}), 500
         
     except Exception as e:
-        if conn:
-            conn.rollback()
-        print(f"General Error in update_company_profile: {e}")
+        if conn: conn.rollback()
+        print(f"General Error in update_company: {e}")
         return jsonify({"status": "error", "message": "Processing error during company update."}), 500
 
     finally:
-        if conn:
-            conn.close()
+        if cur: cur.close()
+        if conn: conn.close()
+        # --- MOCK AUTHENTICATION DECORATOR ---
+def mock_auth_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        g.user_id = MOCK_USER_ID
+        if 'Authorization' not in request.headers or not request.headers['Authorization'].startswith('Bearer '):
+            return jsonify({"status": "error", "message": "Authentication required."}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
+# ======================================================================
+# 5. GET RAW NAMES MAPPED TO SINGLE COMPANY - /api/companies/<int:company_id>/raw_names
+# (REMOVED MANUAL conn.close())
+# ======================================================================
+@app.route('/api/companies/<int:company_id>/raw_names', methods=['GET'])
+@mock_auth_required
+def get_mapped_raw_names(company_id):
+    """
+    Retrieves all raw company names that have been standardized (mapped)
+    to the given clean company profile ID.
+    """
+    conn = None
+    try:
+        # 1. Input Validation
+        if company_id <= 0:
+            return jsonify({"status": "error", "message": "Invalid company ID format."}), 400
+        
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-# ----------------------------------------------------------------------
+        # 2. Check if the target company_id actually exists
+        cur.execute("SELECT company_id FROM companies WHERE company_id = %s;", (company_id,))
+        if cur.fetchone() is None:
+            return jsonify({"status": "error", "message": f"Company profile with ID {company_id} not found."}), 404
+        
+        # 3. Fetch all raw names mapped to this clean company profile
+        query = """
+        SELECT 
+            cnm.raw_name 
+        FROM 
+            company_name_mapping cnm
+        WHERE 
+            cnm.company_id = %s
+        ORDER BY
+            cnm.raw_name ASC;
+        """
+        
+        cur.execute(query, (company_id,))
+        
+        raw_names = [row['raw_name'] for row in cur.fetchall()]
+
+        # 4. Return results.
+        return jsonify({
+            "status": "success",
+            "company_id": company_id,
+            "message": f"Retrieved {len(raw_names)} raw names mapped to company {company_id}.",
+            "raw_names": raw_names
+        }), 200
+
+    except psycopg2.Error as e:
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in get_mapped_raw_names: {db_error_detail}")
+        return jsonify({"status": "error", "message": f"Database error during raw name retrieval: {db_error_detail}"}), 500
+        
+    except Exception as e:
+        print(f"General Error in get_mapped_raw_names: {e}")
+        return jsonify({"status": "error", "message": "Processing error during raw name retrieval."}), 500
+
+    # Removed the manual 'finally: conn.close()' block# ----------------------------------------------------------------------
 # 6. MAP RAW NAME TO EXISTING COMPANY (Standardization Action)
 # ----------------------------------------------------------------------
 @app.route('/api/map/existing', methods=['POST'])
+@mock_auth_required
 def map_to_existing():
-    """Maps a raw_name_id to an existing company_id."""
+    """
+    Maps a raw company name (string PK) to an existing company_id.
+    
+    Expected JSON Payload:
+    {
+        "raw_name": "Google Inc",
+        "company_id": 12345
+    }
+    """
     data = request.get_json()
-    raw_name_id = data.get('raw_name_id')
+    # Expect 'raw_name' string, which is the Primary Key of the mapping table
+    raw_name = data.get('raw_name')
     company_id = data.get('company_id')
 
-    if raw_name_id is None or company_id is None:
-        return jsonify({"status": "error", "message": "raw_name_id and company_id are required."}), 400
+    if raw_name is None or company_id is None:
+        return jsonify({"status": "error", "message": "raw_name (string) and company_id (integer) are required."}), 400
 
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
+        # Update the company_name_mapping record for the given raw_name.
+        # It links the raw_name to the standardized company_id.
         sql = """
             UPDATE company_name_mapping
             SET company_id = %s
-            WHERE raw_name_id = %s AND company_id IS NULL;
+            WHERE raw_name = %s 
+              AND company_id IS NULL; -- Only map unmapped records
         """
-        cur.execute(sql, (company_id, raw_name_id))
+        # Use raw_name as the primary key/identifier
+        cur.execute(sql, (company_id, raw_name))
 
         if cur.rowcount == 0:
+             # This happens if the raw_name doesn't exist or is already mapped
              return jsonify({
                 "status": "error", 
-                "message": "Mapping not updated. Raw Name ID not found or already mapped."
+                "message": "Mapping not updated. Raw Name not found or already mapped."
             }), 404
         
         conn.commit()
 
         return jsonify({
             "status": "success",
-            "message": f"Raw name ID {raw_name_id} successfully mapped to existing company ID {company_id}."
+            "message": f"Raw name '{raw_name}' successfully mapped to existing Company ID {company_id}."
         }), 200
 
     except psycopg2.Error as e:
         if conn: conn.rollback()
-        print(f"PostgreSQL Error in map_to_existing: {getattr(e.diag, 'message_primary', 'N/A')}")
-        return jsonify({"status": "error", "message": "Database error during existing map."}), 500
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in map_to_existing: {db_error_detail}")
+        return jsonify({"status": "error", "message": "Database error during map to existing."}), 500
     except Exception as e:
         if conn: conn.rollback()
         print(f"General Error in map_to_existing: {e}")
-        return jsonify({"status": "error", "message": "Processing error during existing map."}), 500
+        return jsonify({"status": "error", "message": "Processing error during map to existing."}), 500
     finally:
-        if conn:
-            conn.close()
-
+        if conn: conn.close()
 # ----------------------------------------------------------------------
 # 7. MAP RAW NAME TO NEW COMPANY (Standardization Action)
 # ----------------------------------------------------------------------
 @app.route('/api/map/new', methods=['POST'])
+@mock_auth_required
 def map_to_new():
-    """Creates a new company record and maps the raw_name_id to it."""
+    """
+    Creates a brand new company profile and maps the specific raw_name (string PK) to it.
+
+    Expected JSON Payload:
+    {
+        "raw_name": "Googel, Inc.",
+        "company_name_clean": "Google"
+    }
+    """
     data = request.get_json()
-    raw_name_id = data.get('raw_name_id')
+    raw_name = data.get('raw_name')
     company_name_clean = data.get('company_name_clean')
 
-    if raw_name_id is None or not company_name_clean:
-        return jsonify({"status": "error", "message": "raw_name_id and company_name_clean are required."}), 400
+    if raw_name is None or company_name_clean is None:
+        return jsonify({"status": "error", "message": "raw_name (string) and company_name_clean are required."}), 400
 
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-
-        # Start transaction: 1. Insert new company, 2. Get new ID, 3. Update mapping
         
-        # 1. Insert new company
+        # 1. Create the new company profile using company_name_clean
+        # FIX: We now ONLY insert the 'company_name_clean' field because 
+        # the current database schema for 'companies' does not include 'user_id' or 'created_at'.
         sql_insert_company = """
             INSERT INTO companies (company_name_clean)
             VALUES (%s)
             RETURNING company_id;
         """
+        # Execute the insert with only the clean name
         cur.execute(sql_insert_company, (company_name_clean,))
         new_company_id = cur.fetchone()[0]
         
-        # 2. Update mapping
+        # 2. Update mapping using the raw_name string key
+        # This links the old raw name to the new company profile
         sql_update_mapping = """
             UPDATE company_name_mapping
             SET company_id = %s
-            WHERE raw_name_id = %s AND company_id IS NULL;
+            WHERE raw_name = %s AND company_id IS NULL;
         """
-        cur.execute(sql_update_mapping, (new_company_id, raw_name_id))
-        
+        cur.execute(sql_update_mapping, (new_company_id, raw_name))
+
         if cur.rowcount == 0:
-            # This indicates the raw name was already mapped between the GET and this POST, or doesn't exist.
-            conn.rollback() 
+            # If nothing was updated, we roll back the company creation
+            conn.rollback()
+            # It's highly likely the raw_name doesn't exist unmapped if rowcount is 0
             return jsonify({
                 "status": "error", 
-                "message": "Mapping not updated. Raw Name ID not found or already mapped. New company was not created."
+                "message": "Mapping not updated. Raw Name not found or already mapped. The new company was not created."
             }), 404
 
         conn.commit()
 
         return jsonify({
             "status": "success",
-            "message": f"New company ID {new_company_id} created and raw name ID {raw_name_id} mapped successfully."
+            "message": f"New company ID {new_company_id} created ('{company_name_clean}') and raw name '{raw_name}' mapped successfully."
         }), 201
 
     except psycopg2.Error as e:
         if conn: conn.rollback()
-        print(f"PostgreSQL Error in map_to_new: {getattr(e.diag, 'message_primary', 'N/A')}")
-        return jsonify({"status": "error", "message": "Database error during new map."}), 500
+        # Log the specific SQL error details
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in map_to_new: {db_error_detail}") 
+        return jsonify({"status": "error", "message": "Database error during map to new."}), 500
     except Exception as e:
         if conn: conn.rollback()
         print(f"General Error in map_to_new: {e}")
-        return jsonify({"status": "error", "message": "Processing error during new map."}), 500
+        return jsonify({"status": "error", "message": "Processing error during map to new."}), 500
     finally:
-        if conn:
-            conn.close()
-
+        if conn: conn.close()
+          
 # ----------------------------------------------------------------------
-# 8. MAP RAW NAME TO SELF (Standardization Action - No Standardization needed)
+# 8. MAP RAW NAME TO SELF (Standardization Action)
 # ----------------------------------------------------------------------
 @app.route('/api/map/self', methods=['POST'])
+@mock_auth_required
 def map_to_self():
-    """Creates a new company record using the raw name as the clean name and maps the raw_name_id to it."""
+    """
+    Creates a new company profile using the raw name as the clean name, 
+    and maps the raw name (string PK) to that new profile in a single transaction.
+    
+    *** FIX: Changed request payload from raw_name_id (int) to raw_name (string) ***
+    """
     data = request.get_json()
-    raw_name_id = data.get('raw_name_id')
-    raw_name = data.get('raw_name') # Expected to be the same as the name used for the company
+    # CRITICAL FIX: Expect 'raw_name' string, not 'raw_name_id' integer
+    raw_name = data.get('raw_name')
 
-    if raw_name_id is None or not raw_name:
-        return jsonify({"status": "error", "message": "raw_name_id and raw_name are required."}), 400
+    if raw_name is None:
+        return jsonify({"status": "error", "message": "raw_name (string) is required."}), 400
 
     conn = None
     try:
@@ -695,46 +816,49 @@ def map_to_self():
 
         # 1. Insert new company using the raw name as the clean name
         sql_insert_company = """
-            INSERT INTO companies (company_name_clean)
-            VALUES (%s)
+            INSERT INTO companies (company_name_clean, user_id)
+            VALUES (%s, %s)
             RETURNING company_id;
         """
-        cur.execute(sql_insert_company, (raw_name,))
+        # raw_name is used as the clean name for the new company
+        cur.execute(sql_insert_company, (raw_name, MOCK_USER_ID))
         new_company_id = cur.fetchone()[0]
         
-        # 2. Update mapping
+        # 2. Update mapping using the raw_name string key
         sql_update_mapping = """
             UPDATE company_name_mapping
             SET company_id = %s
-            WHERE raw_name_id = %s AND company_id IS NULL;
+            WHERE raw_name = %s AND company_id IS NULL;
         """
-        cur.execute(sql_update_mapping, (new_company_id, raw_name_id))
+        # Use raw_name as the primary key/identifier
+        cur.execute(sql_update_mapping, (new_company_id, raw_name))
 
         if cur.rowcount == 0:
             conn.rollback()
             return jsonify({
                 "status": "error", 
-                "message": "Mapping not updated. Raw Name ID not found or already mapped. New company was not created."
+                "message": "Mapping not updated. Raw Name not found or already mapped. New company was not created."
             }), 404
 
         conn.commit()
 
         return jsonify({
             "status": "success",
-            "message": f"New company ID {new_company_id} created (using raw name) and raw name ID {raw_name_id} mapped successfully."
+            "message": f"New company ID {new_company_id} created (using raw name: '{raw_name}') and mapping completed successfully."
         }), 201
 
     except psycopg2.Error as e:
         if conn: conn.rollback()
-        print(f"PostgreSQL Error in map_to_self: {getattr(e.diag, 'message_primary', 'N/A')}")
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in map_to_self: {db_error_detail}")
         return jsonify({"status": "error", "message": "Database error during self map."}), 500
     except Exception as e:
         if conn: conn.rollback()
         print(f"General Error in map_to_self: {e}")
         return jsonify({"status": "error", "message": "Processing error during self map."}), 500
     finally:
-        if conn:
-            conn.close()
+        if cur: cur.close()
+        if conn: conn.close()
 def get_db_cursor(cursor_factory=psycopg2.extras.DictCursor):
     """Returns a connection and a DictCursor (default)."""
     conn = psycopg2.connect(**DB_CONFIG)
@@ -1156,7 +1280,288 @@ def download_document(file_path):
     finally:
         if cur: cur.close()
         if conn: conn.close()
-        ## MAIN (Included for optional local development testing)
+        # ----------------------------------------------------------------------
+# 13. GET COMPANY CONTACTS API: GET /api/companies/<int:company_id>/contacts
+# FIX: Removed the non-existent t2.user_id filter to resolve schema error.
+# ----------------------------------------------------------------------
+@app.route('/api/companies/<int:company_id>/contacts', methods=['GET'])
+@authenticate_request()
+def get_company_contacts(company_id):
+    """
+    Endpoint 13: Retrieves all contacts mapped to the given standardized company_id.
+    NOTE: Security check (user_id filter) is temporarily removed from SQL due to 
+    schema mismatch (missing user_id on company_name_mapping table) as requested.
+    """
+    conn = None
+    cur = None
+    try:
+        # We still retrieve g.user_id for future implementation, but it's not used in the query.
+        user_id = g.user_id 
+
+        if company_id <= 0:
+            return jsonify({"status": "error", "message": "Invalid company ID format."}), 400
+
+        # Assumes get_db_cursor provides a connection (conn) and a DictCursor (cur)
+        conn, cur = get_db_cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # CORRECTED SQL QUERY:
+        # - Selects t1.id and aliases it to contact_id.
+        # - Filters by company_id.
+        # - **REMOVED** the AND t2.user_id = %s filter.
+        sql_query = """
+        SELECT
+            t1.id AS contact_id,
+            t1.first_name,
+            t1.last_name,
+            t1.email_address,
+            t1.position,
+            t1.connected_on,
+            t2.raw_name AS associated_raw_name
+        FROM contacts t1
+        JOIN company_name_mapping t2 ON t1.company = t2.raw_name
+        WHERE t2.company_id = %s;
+        """
+        
+        # We only pass company_id to the execute method now.
+        cur.execute(sql_query, (company_id,))
+        
+        # Convert DictRow objects to standard dictionaries for JSON serialization
+        contacts = [dict(row) for row in cur.fetchall()]
+
+        # The API Wishlist (New Universal Rule for Array Returns) requires this structure
+        return jsonify({
+            "status": "success",
+            "company_id": company_id,
+            "contacts": contacts
+        }), 200
+
+    except psycopg2.Error as e:
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in get_company_contacts: {db_error_detail}")
+        return jsonify({"status": "error", "message": f"Database error retrieving contacts: {db_error_detail}"}), 500
+        
+    except Exception as e:
+        print(f"General Error in get_company_contacts: {e}")
+        return jsonify({"status": "error", "message": "Processing error retrieving contacts."}), 500
+
+    finally:
+        if conn:
+            conn.close()
+            # ----------------------------------------------------------------------
+# 14. SIDEBAR SUMMARY API: GET /api/sidebar
+# FIX: Removed WHERE clause as 'companies' is a global table.
+# ----------------------------------------------------------------------
+@app.route('/api/sidebar', methods=['GET'])
+@requires_auth
+def get_sidebar_summary():
+    """
+    Retrieves a minimal list of companies for UI elements like the sidebar.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # FIX: Query is corrected to retrieve all companies since the 'companies' table 
+        # is a global standardized list and lacks a user_id filter column.
+        sql_query = """
+            SELECT
+                company_id,
+                company_name_clean,
+                target_interest AS is_target
+            FROM
+                companies
+            ORDER BY
+                company_name_clean ASC;
+        """
+        
+        # Execute query without any parameters
+        cur.execute(sql_query)
+        
+        # Fetch all results and convert DictRows to standard dictionaries
+        companies_summary = [dict(row) for row in cur.fetchall()]
+
+        # Return the summary list
+        return jsonify({
+            "status": "success", 
+            "companies": companies_summary
+        }), 200
+
+    except psycopg2.Error as e:
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in get_sidebar_summary: {db_error_detail}")
+        return jsonify({"status": "error", "message": "Database error retrieving sidebar data."}), 500
+        
+    except Exception as e:
+        print(f"General Error in get_sidebar_summary: {e}")
+        return jsonify({"status": "error", "message": "Processing error retrieving sidebar data."}), 500
+        
+    finally:
+        if conn:
+            pass
+# ----------------------------------------------------------------------
+# 15. GET FULL LIST OF UNMAPPED COMPANY NAMES (For the Skip/List View)
+#    *** FIX: Now returns raw_name (string) instead of raw_name_id (int) as the unique key ***
+# ----------------------------------------------------------------------
+@app.route('/api/unmapped_list', methods=['GET'])
+@mock_auth_required
+def get_unmapped_list():
+    """
+    Retrieves a list of all company names not yet mapped. Since the database 
+    PK is the raw_name string, we return it as the identifier.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        # Use a DictCursor to get results as dictionaries
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # Query the company_name_mapping table directly for unmapped records
+        # CRITICAL FIX: Only select raw_name, since it is the primary key/identifier
+        sql = """
+            SELECT 
+                raw_name
+            FROM 
+                company_name_mapping
+            WHERE 
+                company_id IS NULL
+            ORDER BY
+                raw_name;
+        """
+
+        cur.execute(sql)
+        
+        # Results is now an array of objects/strings, but we'll return an array of objects 
+        # for consistency with the spirit of the API Change Request, using 'raw_name' 
+        # as the key/identifier.
+        results = [{'raw_name': row['raw_name']} for row in cur.fetchall()]
+
+        return jsonify({"status": "success", "raw_names": results}), 200
+
+    except psycopg2.Error as e:
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in get_unmapped_list: {db_error_detail}")
+        return jsonify({"status": "error", "message": "Database error retrieving unmapped list."}), 500
+    except Exception as e:
+        print(f"General Error in get_unmapped_list: {e}")
+        return jsonify({"status": "error", "message": "Processing error retrieving unmapped list."}), 500
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+# --- API ENDPOINT 16.0: COMPANY PROFILE SEARCH ---
+
+@app.route('/api/search/company', methods=['GET'])
+@mock_auth_required
+def search_company_profiles():
+    """
+    16.0 GET /api/search/company
+    Provides real-time, debounced search suggestions for existing, standardized company profiles.
+    """
+    query = request.args.get('query', '').strip()
+
+    # --- Parameter Validation ---
+    if not query:
+        return jsonify({
+            "status": "error",
+            "message": "Missing 'query' parameter."
+        }), 400
+
+    if len(query) < 2:
+        return jsonify({
+            "status": "error",
+            "message": "Query must be at least 2 characters long."
+        }), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        
+        if conn is None:
+            return jsonify({
+                "status": "error",
+                "message": "Could not connect to database. Check DB settings and availability in the server console."
+            }), 500
+
+        # We must use DictCursor for the named parameter execution to work seamlessly.
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # CRITICAL FIX: Using named parameters (%(name)s) instead of positional parameters (%s) 
+        # to guarantee the parameter count and assignment is correct, eliminating the IndexEror.
+        sql = """
+            SELECT
+                company_id,
+                company_name_clean
+            FROM
+                companies
+            WHERE
+                -- Filter by anything that contains the query
+                company_name_clean ILIKE %(query_broad)s
+            ORDER BY
+                -- Priority 1: Exact Match
+                CASE WHEN company_name_clean ILIKE %(query_exact)s THEN 1 
+                -- Priority 2: Prefix Match
+                     WHEN company_name_clean ILIKE %(query_prefix)s THEN 2
+                -- Priority 3: Contains Match (this ensures all WHERE results are captured in ORDER BY)
+                     WHEN company_name_clean ILIKE %(query_broad)s THEN 3
+                     ELSE 4 END, 
+                -- Final alphabetical sort
+                company_name_clean
+            LIMIT 10;
+        """
+        
+        # Prepare parameters as a dictionary (keys must match the %(name)s placeholders)
+        params_dict = {
+            'query_exact': query,         # 'microsoft'
+            'query_prefix': f'{query}%',  # 'microsoft%'
+            'query_broad': f'%{query}%',   # '%microsoft%'
+        }
+
+        # Execute the query using the dictionary of named parameters
+        cur.execute(sql, params_dict)
+        results = cur.fetchall()
+
+        companies = []
+        for row in results:
+            companies.append({
+                "company_id": str(row['company_id']), 
+                "company_name_clean": row['company_name_clean']
+            })
+
+        return jsonify({
+            "status": "success",
+            "companies": companies
+        }), 200
+
+    except EnvironmentError as e:
+        return jsonify({
+            "status": "error", 
+            "message": f"Server Configuration Error: {e}"
+        }), 500
+
+    except psycopg2.Error as e:
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        # Log to stderr for robust logging
+        print(f"❌ PostgreSQL Query/Execution Error in search_company_profiles: {db_error_detail}", file=sys.stderr)
+        if conn: conn.rollback()
+        return jsonify({
+            "status": "error", 
+            "message": "A database query error occurred during search. Check server logs for detail."
+        }), 500
+    
+    except Exception as e:
+        # Log the full traceback to stderr
+        print(f"❌ General Error in search_company_profiles: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr) 
+        if conn: conn.rollback()
+        return jsonify({
+            "status": "error", 
+            "message": "An unexpected server error occurred. Check server logs for stack trace."
+        }), 500
+    
+    finally:
+        if conn:
+            conn.close()
+## MAIN (Included for optional local development testing)
 if __name__ == '__main__':
     # This is for local development only. Gunicorn is typically used in production.
     app.run(debug=True, port=5000)

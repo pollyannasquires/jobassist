@@ -3,233 +3,250 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Company Management Tool | JobAssist</title>
+    <title id="pageTitle">Company Management | JobAssist</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script>
+        // Tailwind configuration: Defining custom colors for consistency
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    },
+                    fontFamily: { sans: ['Inter', 'sans-serif'], },
                     colors: {
                         'primary': '#4f46e5', // indigo-600
                         'success': '#10b981', // emerald-500
                         'error': '#ef4444',   // red-500
+                        'warning': '#f59e0b', // amber-500
+                        'sidebar-bg': '#1f2937', // gray-800
                     }
                 }
             }
         }
     </script>
     <style>
-        /* Custom styles for the active state and general look */
-        .company-name-link {
-            transition: all 150ms ease-in-out;
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
+        /* Style for the sidebar container */
+        .sidebar-container {
+            width: 18rem; /* 288px */
         }
-        /* Style for the active/selected company in the sidebar */
-        .company-name-link.active {
-            background-color: #eef2ff; /* indigo-50 */
-            border-left: 4px solid #4f46e5; /* indigo-600 */
-            font-weight: 600;
+        /* Style for the main content area */
+        .main-content {
+            min-height: calc(100vh - 4rem); /* Full height minus navbar height */
+            margin-left: 18rem; /* Offset for the fixed sidebar */
         }
-        /* Custom scrollbar for better look in the sidebar */
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
+        /* Ensure inputs are focusable and look good */
+        input:focus, textarea:focus, select:focus {
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 1px #4f46e5;
         }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #cbd5e1; /* slate-300 */
-            border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: #f1f5f9; /* slate-100 */
-        }
-        /* Sticky bottom button shadow */
-        .shadow-t-lg {
-            box-shadow: 0 -10px 15px -3px rgba(0, 0, 0, 0.05), 0 -4px 6px -2px rgba(0, 0, 0, 0.05);
+        /* Style for required form elements */
+        .form-label:after {
+            content: " *";
+            color: #ef4444; /* red-500 */
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen font-sans">
+<body>
 
-    <div id="statusMessage" role="alert" 
-         class="fixed top-4 left-1/2 -translate-x-1/2 z-50 p-4 rounded-lg text-white font-medium shadow-xl hidden 
-                max-w-md w-full transition-opacity duration-300 opacity-0 transform translate-y-[-10px]">
-        </div>
+    <!-- The Navbar will be injected here by navbar.js -->
 
-    <main class="flex">
+    <main class="flex min-h-screen pt-16">
         
-        <div class="w-full md:w-80 border-r border-gray-200 bg-white flex flex-col shadow-lg">
-            <div class="p-4 border-b border-gray-200">
-                <h1 class="text-xl font-bold text-gray-800">Company Profiles</h1>
-                <div class="mt-3 space-y-3">
-                    <input type="text" id="searchFilter" placeholder="Search by name..."
-                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary transition duration-150">
-                    
-                    <select id="targetFilter"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:ring-primary focus:border-primary transition duration-150">
-                        <option value="all">Target Interest: All</option>
-                        <option value="true">Target Interest: Yes</option>
-                        <option value="false">Target Interest: No</option>
-                    </select>
+        <!-- START: Company Sidebar -->
+        <aside class="sidebar-container bg-sidebar-bg fixed left-0 top-16 bottom-0 overflow-y-auto shadow-xl z-10">
+            <div class="p-4 border-b border-gray-700">
+                <h2 class="text-white text-lg font-semibold mb-2">Company Profiles</h2>
+                <input 
+                    type="text" 
+                    id="sidebarSearchFilter" 
+                    placeholder="Search companies..." 
+                    class="w-full px-3 py-2 text-sm text-gray-900 bg-gray-200 border border-gray-600 rounded-lg focus:outline-none"
+                >
+                <div class="mt-2 flex items-center">
+                    <input type="checkbox" id="sidebarTargetFilter" class="rounded text-primary focus:ring-primary">
+                    <label for="sidebarTargetFilter" class="ml-2 text-sm text-gray-300">Show Targets Only</label>
                 </div>
             </div>
+            <ul id="companyList" class="divide-y divide-gray-700 p-2">
+                <!-- Company links will be injected here by company_sidebar.js -->
+                <li class="p-4 text-gray-400 italic text-sm text-center" id="loadingMessage">Loading companies...</li>
+            </ul>
+        </aside>
+        <!-- END: Company Sidebar -->
+
+
+        <!-- START: Main Content Area -->
+        <div class="main-content flex-1 p-6 lg:p-10">
+
+            <!-- Header Section -->
+            <header class="mb-8 border-b pb-4">
+                <h1 class="text-3xl font-extrabold text-gray-900" id="companyNameDisplay">Company Management</h1>
+                <p class="text-sm text-gray-500" id="companyIdDisplay">ID: N/A</p>
+                <div id="statusMessage" role="alert" class="mt-4 opacity-0 h-0 transition-opacity duration-300"></div>
+            </header>
             
-            <div id="companyListContainer" class="flex-grow overflow-y-auto custom-scrollbar">
-                <div id="companyList" class="divide-y divide-gray-100">
-                    <div class="p-4 text-center text-gray-500 italic">Loading companies...</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="flex-grow flex flex-col overflow-hidden">
-            <div id="initialMessage" class="flex flex-col items-center justify-center flex-grow text-gray-500 p-6">
-                <i data-lucide="building-2" class="w-16 h-16 text-gray-300 mb-4"></i>
-                <p class="text-lg font-medium">Select a company from the left to view and manage its profile.</p>
+            <!-- Initial Placeholder Message -->
+            <div id="initialPlaceholder" class="bg-white p-8 rounded-xl shadow-lg text-center border border-dashed border-gray-300">
+                <i data-lucide="building-2" class="w-12 h-12 text-gray-400 mx-auto mb-4"></i>
+                <h2 class="text-xl font-semibold text-gray-700">Select a Company</h2>
+                <p class="text-gray-500 mt-2">Please select a company from the sidebar to the left to view and manage its profile, raw names, and contacts.</p>
             </div>
 
-            <div id="profileContainer" class="hidden flex-grow overflow-y-auto custom-scrollbar">
-                 
-<div class="mb-6 pb-4 border-b border-gray-200">
-            <h2 class="text-3xl font-extrabold text-gray-900 mb-2">
-                <span id="companyTitle">Select a Company</span>
-            </h2>
-            <a href="#" id="appReviewBtn"
-               class="inline-flex items-center text-sm font-semibold text-white bg-primary hover:bg-indigo-700 px-3 py-2 rounded-lg shadow-md transition-colors"
-               style="display: none;">
-                <i data-lucide="folder-check" class="w-4 h-4 mr-1"></i>
-                Review Applications
-            </a>
+
+            <!-- Management Content (Hidden by default, shown when companyId is present) -->
+            <div id="managementContent" class="space-y-12 hidden">
+
+                <!-- 1. Company Profile Form -->
+                <section class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+                        <i data-lucide="briefcase" class="w-6 h-6 mr-3 text-primary"></i> Company Profile
+                    </h2>
+                    <form id="companyForm" class="space-y-6">
+                        
+                        <!-- Row 1: Name and Headquarters -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label for="companyName" class="form-label block text-sm font-medium text-gray-700">Company Name</label>
+                                <input type="text" id="companyName" name="company_name_clean" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                            </div>
+                            <div>
+                                <label for="headquarters" class="block text-sm font-medium text-gray-700">Headquarters</label>
+                                <input type="text" id="headquarters" name="headquarters" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                            </div>
+                        </div>
+
+                        <!-- Row 2: Website and Target Interest -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label for="website_url" class="block text-sm font-medium text-gray-700">Website URL</label>
+                                <input type="url" id="website_url" name="website_url" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                            </div>
+                            <div class="flex items-center pt-5">
+                                <input type="checkbox" id="targetInterest" name="target_interest" class="rounded text-primary focus:ring-primary h-5 w-5">
+                                <label for="targetInterest" class="ml-3 block text-sm font-medium text-gray-700">Target Interest (Active pursuit)</label>
+                            </div>
+                        </div>
+
+                        <!-- Row 3: Size and Revenue -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div>
+                                <label for="size_employees" class="block text-sm font-medium text-gray-700">Employees (Size)</label>
+                                <input type="number" id="size_employees" name="size_employees" min="0" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                            </div>
+                            <div>
+                                <label for="annual_revenue" class="block text-sm font-medium text-gray-700">Annual Revenue (Value)</label>
+                                <input type="number" id="annual_revenue" name="annual_revenue" step="0.1" min="0" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                            </div>
+                            <div>
+                                <label for="revenue_scale" class="block text-sm font-medium text-gray-700">Revenue Scale</label>
+                                <select id="revenue_scale" name="revenue_scale" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                                    <option value="K">Thousands (K)</option>
+                                    <option value="M">Millions (M)</option>
+                                    <option value="B">Billions (B)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Row 4: Notes -->
+                        <div>
+                            <label for="notes" class="block text-sm font-medium text-gray-700">Internal Notes</label>
+                            <textarea id="notes" name="notes" rows="3" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3"></textarea>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="pt-4 border-t">
+                            <button 
+                                type="submit" 
+                                id="saveProfileBtn" 
+                                class="inline-flex justify-center items-center py-3 px-6 border border-transparent shadow-md text-sm font-medium rounded-lg text-white bg-primary hover:bg-indigo-700 transition duration-150 ease-in-out"
+                            >
+                                <i data-lucide="save" class="w-5 h-5 inline mr-2"></i> Save Profile
+                            </button>
+                        </div>
+
+                    </form>
+                </section>
+
+                <!-- 2. Raw Names Table -->
+                <section class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                        <i data-lucide="fingerprint" class="w-6 h-6 mr-3 text-warning"></i> Raw Names/Aliases
+                    </h2>
+                    <p class="text-sm text-gray-500 mb-4">Names used by sources that map to this company.</p>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Raw Name
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="rawNamesTableBody" class="bg-white divide-y divide-gray-200">
+                                <!-- Raw Names will be injected here by management.js -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- 3. Contacts Table -->
+                <section class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                        <i data-lucide="users-2" class="w-6 h-6 mr-3 text-success"></i> Associated Contacts
+                    </h2>
+                    <p class="text-sm text-gray-500 mb-4">Known contacts connected to this company.</p>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Name
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Position
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Email
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Connected Date
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="contactsTableBody" class="bg-white divide-y divide-gray-200">
+                                <!-- Contacts will be injected here by management.js -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+            <!-- END: Management Content -->
+            
         </div>
-                <div class="p-6">
-                    <div class="max-w-4xl mx-auto">
-                        <form id="companyForm">
-                            <input type="hidden" id="company_id" name="company_id">
-
-                            <div class="mb-8 p-6 bg-white rounded-lg shadow-md border border-gray-200">
-                                <h3 class="text-xl font-semibold text-gray-800 border-b pb-3 mb-4 flex items-center">
-                                    <i data-lucide="git-branch" class="w-5 h-5 mr-2 text-primary"></i>
-                                    Raw Name Mapping
-                                </h3>
-                                <div class="space-y-4">
-                                    <div>
-                                        <label for="company_name_clean" class="block text-sm font-medium text-gray-700">Clean Company Name (Standardized)</label>
-                                        <input type="text" id="company_name_clean" name="company_name_clean" required
-                                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-primary focus:border-primary transition duration-150 text-lg font-medium">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                                            Mapped Raw Names (<span id="rawNamesCount">0</span>)
-                                        </label>
-                                        <div id="rawNamesList" class="p-3 border border-gray-300 rounded-md bg-gray-50 min-h-[50px]">
-                                            <p class="text-sm text-gray-500 italic">No raw names mapped yet.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="mb-8 p-6 bg-white rounded-lg shadow-md border border-gray-200">
-                                <h3 class="text-xl font-semibold text-gray-800 border-b pb-3 mb-4 flex items-center">
-                                    <i data-lucide="rocket" class="w-5 h-5 mr-2 text-primary"></i>
-                                    Enrichment Data
-                                </h3>
-                                <div class="space-y-4">
-                                    <div class="flex items-start">
-                                        <div class="flex items-center h-5">
-                                            <input id="target_interest" name="target_interest" type="checkbox"
-                                                   class="focus:ring-primary h-5 w-5 text-primary border-gray-300 rounded">
-                                        </div>
-                                        <div class="ml-3 text-sm">
-                                            <label for="target_interest" class="font-medium text-gray-700">Target Interest</label>
-                                            <p class="text-gray-500">Flag this company for sales/marketing priority.</p>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label for="headquarters" class="block text-sm font-medium text-gray-700">Headquarters (e.g., "London, UK")</label>
-                                        <input type="text" id="headquarters" name="headquarters"
-                                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-primary focus:border-primary transition duration-150">
-                                    </div>
-
-                                    <div>
-                                        <label for="size_employees" class="block text-sm font-medium text-gray-700">Employee Size</label>
-                                        <input type="number" id="size_employees" name="size_employees" min="0"
-                                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-primary focus:border-primary transition duration-150">
-                                    </div>
-
-                                    <div class="flex space-x-4">
-                                        <div class="flex-grow">
-                                            <label for="annual_revenue" class="block text-sm font-medium text-gray-700">Annual Revenue (Numeric)</label>
-                                            <input type="number" id="annual_revenue" name="annual_revenue" min="0" step="0.01"
-                                                   class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-primary focus:border-primary transition duration-150">
-                                        </div>
-                                        <div>
-                                            <label for="revenue_scale" class="block text-sm font-medium text-gray-700">Scale</label>
-                                            <select id="revenue_scale" name="revenue_scale"
-                                                    class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 bg-white focus:ring-primary focus:border-primary transition duration-150">
-                                                <option value="N">N/A</option>
-                                                <option value="K">Thousands (K)</option>
-                                                <option value="M">Millions (M)</option>
-                                                <option value="B">Billions (B)</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="mb-8 p-6 bg-white rounded-lg shadow-md border border-gray-200">
-                                <h3 class="text-xl font-semibold text-gray-800 border-b pb-3 mb-4 flex items-center">
-                                    <i data-lucide="notebook-text" class="w-5 h-5 mr-2 text-primary"></i>
-                                    Internal Notes
-                                </h3>
-                                <div>
-                                    <label for="notes" class="block text-sm font-medium text-gray-700">Add any relevant text, history, or contact information.</label>
-                                    <textarea id="notes" name="notes" rows="4"
-                                              class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-primary focus:border-primary transition duration-150"></textarea>
-                                </div>
-                            </div>
-
-                            <div class="mb-8 p-6 bg-white rounded-lg shadow-md border border-gray-200">
-                                <h3 class="text-xl font-semibold text-gray-800 border-b pb-3 mb-4 flex items-center">
-                                    <i data-lucide="users" class="w-5 h-5 mr-2 text-primary"></i>
-                                    Associated Contacts (<span id="contactCount">0</span>)
-                                </h3>
-
-                                <div class="overflow-x-auto">
-                                    <table class="min-w-full divide-y divide-gray-200">
-                                        <thead class="bg-gray-50">
-                                            <tr>
-                                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Contact Name
-                                                </th>
-                                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Job Title
-                                                </th>
-                                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Email
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="contactsTableBody" class="bg-white divide-y divide-gray-200">
-                                            <tr><td colspan="3" class="text-center py-4 text-gray-500 italic">Select a company to load contacts.</td></tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-
-                            <div class="sticky bottom-0 bg-white p-4 -mx-6 border-t border-gray-200 mt-6 shadow-t-lg">
-                                <button type="submit" id="saveBtn"
-                                        class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-lg text-lg font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors">
-                                    Save Changes
-                                </button>
-                            </div>
-                        </form>
-                    </div> </div> </div> </div>
+        <!-- END: Main Content Area -->
+        
     </main>
+
+    <!-- START: Script loading section -->
+
+    <!-- 1. CRITICAL: Define the required Firebase/Canvas globals -->
+    <script>
+        // These variables are mandatory for Firebase initialization in the canvas environment.
+        var __app_id = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        var __firebase_config = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        var __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    </script>
     
-    <script src="navbar.js"></script>
+    <!-- 2. Load all scripts as modules -->
+    <script type="module" src="core-utils.js"></script> 
+    <script type="module" src="navbar.js"></script>
+    <script type="module" src="company_sidebar.js"></script> 
     
-    <script src="management.js"></script>
+    <!-- CRITICAL: The main application logic -->
+    <script type="module" src="management.js"></script>
+    
+    <!-- END: Script loading section -->
 
 </body>
 </html>

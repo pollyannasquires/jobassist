@@ -50,7 +50,7 @@ const navHtml = (userId) => {
 /**
  * Injects the navigation bar into the page body and sets the active link style.
  */
-function injectNavbar() {
+export function injectNavbar() {
     // NOTE: userId is provided via core-utils.js in the host HTML page
     const userId = window.__userId || 'N/A'; // Assume global availability of __userId after core-utils.js loads
 
@@ -68,6 +68,8 @@ function injectNavbar() {
     } else if (path.includes('management.html')) {
         activeId = 'nav-management';
     } else if (path.includes('application_review.html')) {
+        activeId = 'nav-application_review'; 
+    }  else if (path === 'application_review.html' || path === 'application_create.html') {
         activeId = 'nav-application_review'; 
     } else {
         // Default to index.html (Dashboard)

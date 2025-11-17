@@ -1,4 +1,4 @@
-<!-- FILENAME: index.html | LAST EDITED: 2025-10-24 -->
+<!-- FILENAME: index.html | LAST EDITED: 2025-11-17 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,10 +9,13 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Use Inter Font -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    
     <style>
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f7f9fc; /* Light background for the dashboard */
+            /* CRITICAL: Ensure space for the fixed navbar (h-16 = 64px) */
+            padding-top: 64px; 
         }
         .container-padding {
             padding: 1.5rem 1rem;
@@ -24,7 +27,7 @@
         }
         .loading-animation {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #3b82f6; /* Blue spinner */
+            border-top: 4px solid #4f46e5; /* Primary spinner color (indigo-600) */
             border-radius: 50%;
             width: 24px;
             height: 24px;
@@ -37,6 +40,7 @@
     </style>
 </head>
 <body class="min-h-screen">
+    <!-- The Navigation Bar will be injected here by navbar.js -->
 
     <main class="container-padding max-w-7xl mx-auto">
         <h2 class="text-3xl font-bold text-gray-800 mb-6">Company Dashboard</h2>
@@ -93,7 +97,23 @@
         </div>
     </main>
 
-    <script>
+    <!-- Global Dependency: Lucide Icons (must be loaded before navbar.js uses it) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Module Dependencies and Main Application Script -->
+    <!-- The external navbar script (assuming it now exports injectNavbar) -->
+    <script type="module" src="navbar.js"></script>
+
+    <script type="module">
+        // Import only the approved exported functions from core-utils
+        import { initializeServices, fetchWithGuard, currentUserId } from './core-utils.js';
+        
+        // Import the approved exported function from navbar.js
+        import { injectNavbar } from './navbar.js'; 
+
+        // CRITICAL: MOCK USER IMPLEMENTATION 
+        window.__userId = 'mock-user-428613';
+        
         // State management for sorting
         let companyData = [];
         let currentSort = { column: 'company_name_clean', direction: 'asc' };
@@ -108,6 +128,18 @@
         const formatRevenue = (revenue, scale) => {
             if (revenue === null || revenue === undefined) return 'N/A';
             return `$${revenue} ${scale || ''}`;
+        };
+
+        // Updates the visual indicators (arrows) in the table headers
+        const updateSortIndicators = () => {
+            document.querySelectorAll('.sort-indicator').forEach(span => {
+                span.innerHTML = '';
+            });
+
+            const currentSpan = document.querySelector(`.sort-indicator[data-column="${currentSort.column}"]`);
+            if (currentSpan) {
+                currentSpan.innerHTML = currentSort.direction === 'asc' ? '&#9650;' : '&#9660;'; // Up/Down Triangles
+            }
         };
 
         // Renders the data into the table body
@@ -155,7 +187,7 @@
         };
 
         // Sorts the companyData array and re-renders the table
-        const sortTable = (column) => {
+        window.sortTable = (column) => {
             if (currentSort.column === column) {
                 currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
             } else {
@@ -165,41 +197,44 @@
 
             companyData.sort((a, b) => {
                 let valA, valB;
+                const dir = currentSort.direction;
+                
+                // Helper to treat null/undefined values for sorting
+                const getComparableValue = (item, prop) => {
+                    const value = item[prop];
+                    if (value === null || value === undefined) {
+                        // For ascending, nulls go to the end (Infinity). For descending, nulls go to the beginning (-Infinity).
+                        return dir === 'asc' ? Infinity : -Infinity;
+                    }
+                    return value;
+                };
 
                 // Special handling for revenue to combine numeric part and scale
                 if (column === 'annual_revenue') {
-                    // Convert revenue to a comparable value (e.g., 5.2 B -> 5,200,000,000)
                     const getComparableRevenue = (company) => {
-                        // Null revenue is already treated as 0 here
                         const val = parseFloat(company.annual_revenue) || 0;
                         const scale = company.revenue_scale;
+                        if (val === 0 || val === null || val === undefined) return getComparableValue(company, 'annual_revenue');
                         if (scale === 'K') return val * 1e3;
                         if (scale === 'M') return val * 1e6;
                         if (scale === 'B') return val * 1e9;
-                        return val; // Default if scale is missing or unknown
+                        return val;
                     };
                     valA = getComparableRevenue(a);
                     valB = getComparableRevenue(b);
                 } else {
                     // This handles all other columns: company_name_clean, size_employees, target_interest
-                    if (column === 'size_employees') {
-                        // Per user request: treat null (N/A) as 0 for numeric size sorting
-                        valA = a[column] === null ? 0 : a[column];
-                        valB = b[column] === null ? 0 : b[column];
-                    } else {
-                        // For non-numeric columns (strings/booleans), continue to sort nulls to the ends
-                        // by using -Infinity/Infinity based on sort direction
-                        valA = a[column] === null ? (currentSort.direction === 'asc' ? -Infinity : Infinity) : a[column];
-                        valB = b[column] === null ? (currentSort.direction === 'asc' ? -Infinity : Infinity) : b[column];
-                    }
+                    valA = getComparableValue(a, column);
+                    // CRITICAL BUG FIX: Ensure valB reads from object 'b'
+                    valB = getComparableValue(b, column);
                 }
                 
-                // Default comparison for strings, numbers, and booleans
+                // Default comparison
                 if (valA < valB) {
-                    return currentSort.direction === 'asc' ? -1 : 1;
+                    return dir === 'asc' ? -1 : 1;
                 }
                 if (valA > valB) {
-                    return currentSort.direction === 'asc' ? 1 : -1;
+                    return dir === 'asc' ? 1 : -1;
                 }
                 return 0;
             });
@@ -207,19 +242,9 @@
             renderTable(companyData);
         };
 
-        // Updates the visual indicators (arrows) in the table headers
-        const updateSortIndicators = () => {
-            document.querySelectorAll('.sort-indicator').forEach(span => {
-                span.innerHTML = '';
-            });
-
-            const currentSpan = document.querySelector(`.sort-indicator[data-column="${currentSort.column}"]`);
-            if (currentSpan) {
-                currentSpan.innerHTML = currentSort.direction === 'asc' ? '&#9650;' : '&#9660;'; // Up/Down Triangles
-            }
-        };
-
-        // Main function to fetch data
+        /**
+         * Main function to fetch company data from the API using the guarded utility.
+         */
         const fetchCompanies = async () => {
             const loading = document.getElementById('loadingMessage');
             const errorDiv = document.getElementById('errorMessage');
@@ -227,30 +252,20 @@
             errorDiv.classList.add('hidden');
 
             try {
-                // Implementing exponential backoff for robustness
-                const maxRetries = 3;
-                let response = null;
-
-                for (let attempt = 0; attempt < maxRetries; attempt++) {
-                    response = await fetch('/api/companies');
-                    if (response.ok) {
-                        break;
-                    }
-                    if (attempt < maxRetries - 1) {
-                        const delay = Math.pow(2, attempt) * 1000;
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    } else {
-                        throw new Error(`Failed to fetch data after ${maxRetries} attempts. Status: ${response.status}`);
-                    }
+                // Wait for Firebase Auth to be ready before calling the API
+                if (!currentUserId) {
+                   await new Promise(resolve => setTimeout(resolve, 50)); 
                 }
-
-                const result = await response.json();
+                
+                // Using the correct 4-argument syntax for fetchWithGuard
+                const result = await fetchWithGuard('/api/companies', 'GET', 'Company Dashboard Data Fetch', {});
 
                 if (result.status === 'success' && Array.isArray(result.companies)) {
                     companyData = result.companies;
                     // Initial sort by clean name (default)
-                    sortTable(currentSort.column);
+                    window.sortTable(currentSort.column); 
                 } else {
+                    // Treat non-success or malformed data as an error
                     throw new Error(result.message || 'API returned a non-success status or malformed data.');
                 }
 
@@ -258,21 +273,43 @@
                 console.error("Fetch Error:", error);
                 document.getElementById('errorDetail').textContent = error.message;
                 errorDiv.classList.remove('hidden');
-                // Render an empty table if the fetch fails
+                // Render an empty table to clear any previous data and show 'No Data' message
                 renderTable([]);
             } finally {
                 loading.classList.add('hidden');
             }
         };
 
-        // Initialize the dashboard on page load
-        window.onload = fetchCompanies;
+        /**
+         * Orchestrates the application launch sequence.
+         */
+        const bootApplication = async () => {
+            try {
+                // 1. Initialize Firebase services and authenticate
+                await initializeServices(); 
+
+                // 2. Inject Navbar structure and set active link
+                // This resolves the race condition by explicitly calling the function after imports
+                injectNavbar(); 
+                
+                // 3. Fetch primary dashboard data
+                await fetchCompanies();
+
+            } catch (error) {
+                console.error("Application Boot Error:", error);
+                const errorDiv = document.getElementById('errorMessage');
+                document.getElementById('errorDetail').textContent = `Failed to initialize application: ${error.message}`;
+                errorDiv.classList.remove('hidden');
+            }
+        };
+
+
+        // Start the application after the DOM is ready
+        document.addEventListener('DOMContentLoaded', bootApplication);
 
     </script>
-    <main class="container-padding mx-auto max-w-7xl mt-4">
-        </main>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Tailwind Config for Primary Color -->
     <script>
         tailwind.config = {
             theme: {
@@ -281,7 +318,7 @@
                         sans: ['Inter', 'sans-serif'],
                     },
                     colors: {
-                        'primary': '#4f46e5', // indigo-600
+                        'primary': '#4f46e5', // indigo-600 (Used by Navbar)
                         'success': '#10b981', // emerald-500
                         'error': '#ef4444',   // red-500
                     }
@@ -289,7 +326,6 @@
             }
         }
     </script>
-        <script src="navbar.js"></script> 
     
 </body>
 </html>

@@ -3,140 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Record New Application | JobAssist</title>
+    <title>New Application | JobAssist</title>
+    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Configure Tailwind with a primary color -->
     <script>
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'], },
                     colors: {
-                        'primary': '#4f46e5', // indigo-600
-                        'success': '#10b981', // emerald-500
-                        'error': '#ef4444',   // red-500
-                    }
-                }
-            }
-        }
+                        primary: {
+                            600: '#4F46E5', // Indigo-600
+                            700: '#4338CA', // Indigo-700
+                        },
+                    },
+                },
+            },
+        };
     </script>
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
-        /* Style for required file inputs */
-        input[type="file"]::file-selector-button {
-            cursor: pointer;
+        /* Apply Inter font */
+        body { font-family: 'Inter', sans-serif; }
+        /* Style for the fixed sidebar */
+        #sidebar {
+            position: fixed;
+            top: 64px; /* Below the fixed navbar (h-16) */
+            bottom: 0;
+            width: 320px;
+            overflow-y: auto;
+            border-right: 1px solid #e5e7eb;
+        }
+        /* Style for main content area to clear the fixed sidebar and FIXED NAVBAR */
+        #main-content {
+            margin-left: 320px;
+            /* CRITICAL FIX: Add margin-top to clear the 64px fixed navbar */
+            margin-top: 64px; 
+            padding-bottom: 3rem; /* Add some space at the bottom */
         }
     </style>
 </head>
 <body>
-    
-    <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-12">
-        <div id="statusMessage" class="hidden fixed top-20 right-4 p-4 rounded-lg shadow-xl text-white z-50 transition-all"></div>
+    <!-- Navbar will be injected here by application_create.js -->
 
-        <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Record New Application</h1>
-        <p class="text-xl text-gray-600 mb-6 flex items-center">
-            <i data-lucide="building-2" class="w-6 h-6 mr-2"></i>
-            Company: <span id="companyNameDisplay" class="font-bold ml-2 text-primary">Loading...</span>
-        </p>
+    <main class="min-h-screen bg-gray-50">
+        <!-- 1. Company Sidebar -->
+        <div id="sidebar" class="bg-gray-800 text-white z-10">
+            <div class="p-4 border-b border-gray-700 flex flex-col space-y-2">
+                <input type="text" id="sidebarSearchFilter" placeholder="Search Companies..." 
+                       class="w-full p-2 rounded-md bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-primary-600 focus:border-primary-600 transition duration-150">
+                <select id="sidebarTargetFilter" 
+                        class="w-full p-2 rounded-md bg-gray-700 border-gray-600 text-white focus:ring-primary-600 focus:border-primary-600 transition duration-150">
+                    <option value="all">All Companies</option>
+                    <option value="target">Targeted Only</option>
+                </select>
+            </div>
+            <!-- This is where the company list will be rendered -->
+            <ul id="companyList" class="py-2 space-y-1">
+                <li class="p-4 text-sm text-gray-400">Loading companies...</li>
+            </ul>
+        </div>
 
-        <form id="newApplicationForm" class="space-y-8">
-
-            <fieldset class="border border-gray-200 p-6 rounded-xl shadow-sm space-y-6">
-                <legend class="text-xl font-bold text-gray-800 px-2">Application Details</legend>
-
-                <!-- Job Title -->
-                <div>
-                    <label for="jobTitle" class="block text-md font-medium text-gray-700 mb-1">Job Title / Role *</label>
-                    <input type="text" id="jobTitle" name="jobTitle" required 
-                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary">
-                </div>
+        <!-- 2. Main Content / Application Form -->
+        <div id="main-content" class="p-8">
+            <div class="max-w-4xl mx-auto bg-white p-8 rounded-xl shadow-lg">
+                <h1 class="text-3xl font-extrabold text-gray-900 mb-6 border-b pb-4">Create New Job Application</h1>
                 
-                <!-- Application Date -->
-                <div>
-                    <label for="applicationDate" class="block text-md font-medium text-gray-700 mb-1">Date Applied *</label>
-                    <input type="date" id="applicationDate" name="applicationDate" required 
-                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary">
-                </div>
-                
-                <!-- Job Link (Optional) -->
-                <div>
-                    <label for="jobLink" class="block text-md font-medium text-gray-700 mb-1">Job Posting Link (Optional)</label>
-                    <input type="url" id="jobLink" name="jobLink" placeholder="e.g., https://linkedin.com/jobs/..."
-                           class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary">
-                </div>
-
-                <!-- Notes (Optional) -->
-                <div>
-                    <label for="notes" class="block text-md font-medium text-gray-700 mb-1">Notes (e.g., Referral, Interviewer names)</label>
-                    <textarea id="notes" name="notes" rows="4" 
-                              class="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-primary focus:border-primary"></textarea>
-                </div>
-                
-                <!-- Is Target Checkbox -->
-                <div class="flex items-center pt-4 border-t border-gray-100">
-                    <input id="isTarget" name="isTarget" type="checkbox" 
-                           class="h-5 w-5 text-primary border-gray-300 rounded focus:ring-primary">
-                    <label for="isTarget" class="ml-3 text-md font-medium text-gray-700">Mark as Target Company Application</label>
-                </div>
-            </fieldset>
-
-            <fieldset class="border border-gray-200 p-6 rounded-xl shadow-sm space-y-6">
-                <legend class="text-xl font-bold text-gray-800 px-2">Documents (To be uploaded instantly)</legend>
-                <p class="text-sm text-gray-500 -mt-4 mb-4">You can upload a resume and optional files now, or add more later on the review page.</p>
-
-                <div class="space-y-6">
-                    <!-- Resume File -->
-                    <div class="border border-gray-200 p-4 rounded-lg">
-                        <label for="resumeFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
-                            <i data-lucide="file-text" class="w-5 h-5 mr-2 text-primary"></i> Resume / CV * (Required)
-                        </label>
-                        <input type="file" id="resumeFile" name="RESUME" accept=".pdf,.docx" required
-                           class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
-                    </div>
-
-                    <!-- Cover Letter File -->
-                    <div class="border border-gray-200 p-4 rounded-lg">
-                         <label for="coverLetterFile" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
-                            <i data-lucide="mail-open" class="w-5 h-5 mr-2 text-primary"></i> Cover Letter (Optional)
-                        </label>
-                         <input type="file" id="coverLetterFile" name="COVER_LETTER" accept=".pdf,.docx" 
-                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
-                    </div>
+                <form id="applicationForm" class="space-y-6">
                     
-                    <!-- Other Files -->
-                    <div class="border border-gray-200 p-4 rounded-lg">
-                         <label for="otherFiles" class="block text-md font-semibold text-gray-800 flex items-center mb-2">
-                            <i data-lucide="folder" class="w-5 h-5 mr-2 text-primary"></i> Other Supporting Files (Optional, Multiple)
-                        </label>
-                         <input type="file" id="otherFiles" name="OTHER_FILE" accept=".pdf,.docx,.jpg,.png" multiple 
-                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20">
+                    <!-- Company Details (Pre-populated) -->
+                    <div class="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
+                        <label for="companyName" class="block text-sm font-medium text-indigo-700 mb-2">Company ID: <span id="displayCompanyId" class="font-mono text-xs bg-indigo-100 p-1 rounded">N/A</span></label>
+                        <input type="text" id="companyName" name="company_name_clean" readonly 
+                               class="w-full p-3 border border-indigo-300 rounded-lg bg-white font-semibold text-lg text-indigo-800"
+                               value="Loading Company Details..." required>
+                        <input type="hidden" id="companyId" name="company_id">
                     </div>
-                </div>
-            </fieldset>
 
-            <button type="submit" id="submitBtn"
-                    class="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-lg text-lg font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors disabled:bg-gray-400">
-                <i data-lucide="save" class="w-5 h-5 mr-2"></i> Save Application & Upload Documents
-            </button>
-        </form>
+                    <!-- Application Details -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="jobTitle" class="block text-sm font-medium text-gray-700">Job Title</label>
+                            <input type="text" id="jobTitle" name="title_name" required 
+                                   class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-600 focus:border-primary-600 transition duration-150">
+                        </div>
+                        <div>
+                            <label for="dateApplied" class="block text-sm font-medium text-gray-700">Date Applied</label>
+                            <input type="date" id="dateApplied" name="date_applied" required 
+                                   class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-600 focus:border-primary-600 transition duration-150">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="currentStatus" class="block text-sm font-medium text-gray-700">Application Status</label>
+                        <select id="currentStatus" name="current_status" required
+                                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-600 focus:border-primary-600 transition duration-150">
+                            <option value="" disabled selected>Select Status</option>
+                            <option value="APPLIED">Applied</option>
+                            <option value="PENDING">Pending Review</option>
+                            <option value="INTERVIEWING">Interviewing</option>
+                            <option value="OFFER">Offer Received</option>
+                            <option value="REJECTED">Rejected</option>
+                        </select>
+                    </div>
+
+                    <!-- Document Upload Section -->
+                    <div class="pt-6 border-t border-gray-200">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex justify-between items-center">
+                            Supporting Documents
+                            <button type="button" id="addDocumentBtn" 
+                                    class="text-primary-600 hover:text-primary-700 font-medium text-sm transition-colors flex items-center">
+                                <i data-lucide="plus-circle" class="w-4 h-4 mr-1"></i> Add Document
+                            </button>
+                        </h2>
+                        
+                        <div id="documentUploadContainer" class="space-y-4">
+                            <!-- Document rows will be dynamically added here -->
+                        </div>
+                        <p class="text-sm text-gray-500 mt-2">Accepted types: Resume, Cover Letter, Other. You can upload multiple files.</p>
+                    </div>
+
+
+                    <!-- Submit Button -->
+                    <div class="pt-6">
+                        <button type="submit" id="submitBtn" 
+                                class="w-full py-3 px-4 bg-primary-600 text-white font-semibold rounded-lg shadow-md hover:bg-primary-700 transition duration-200 flex items-center justify-center disabled:opacity-50" disabled>
+                            <i data-lucide="send" class="w-5 h-5 mr-2"></i> Submit Application
+                        </button>
+                    </div>
+
+                    <!-- Message Box for Feedback -->
+                    <div id="messageBox" class="hidden p-4 rounded-lg mt-4 text-center"></div>
+
+                </form>
+            </div>
+        </div>
     </main>
 
-    <!-- START: Script loading section -->
+    <!-- Application Logic -->
+    <script type="module" src="./application_create.js"></script>
 
-    <!-- 1. CRITICAL FIX: Define the required Firebase/Canvas globals using 'var' -->
-    <script>
-        // Using 'var' ensures the variables are correctly hoisted and accessible 
-        // by subsequent modules, resolving the ReferenceError if the environment
-        // fails to provide them.
-        var __app_id = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        var __firebase_config = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
-        var __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-    </script>
-    
-    <!-- 2. Load all scripts as modules -->
-    <script type="module" src="core-utils.js"></script> 
-    <script type="module" src="application_create.js"></script>
-
-    <!-- END: Script loading section -->
 </body>
 </html>
