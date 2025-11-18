@@ -28,189 +28,186 @@
         /* Style for the sidebar container */
         .sidebar-container {
             width: 18rem; /* 288px */
+            flex-shrink: 0; /* Prevent it from shrinking */
         }
         /* Style for the main content area */
+        /* Ensure the main content takes the remaining space and is scrollable */
         .main-content {
-            min-height: calc(100vh - 4rem); /* Full height minus navbar height */
-            margin-left: 18rem; /* Offset for the fixed sidebar */
+            min-height: calc(100vh - 4rem); /* Full height minus navbar */
+            overflow-y: auto;
+            flex-grow: 1; /* Allow it to fill the remaining width */
         }
-        /* Ensure inputs are focusable and look good */
-        input:focus, textarea:focus, select:focus {
-            border-color: #4f46e5;
-            box-shadow: 0 0 0 1px #4f46e5;
+        /* Style for the toast container */
+        #toastContainer {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
         }
-        /* Style for required form elements */
-        .form-label:after {
-            content: " *";
-            color: #ef4444; /* red-500 */
+        /* Hide scrollbar for cleaner look */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
         }
     </style>
 </head>
-<body>
+<body class="min-h-screen flex flex-col">
 
-    <!-- The Navbar will be injected here by navbar.js -->
+    <!-- START: Navbar (navbar.js will target this) -->
+    <nav id="navbar" class="bg-white shadow-md z-10 sticky top-0"></nav>
+    <!-- END: Navbar -->
 
-    <main class="flex min-h-screen pt-16">
+    <main class="flex flex-1 w-full pt-16"> <!-- Padding top to clear the sticky navbar -->
         
-        <!-- START: Company Sidebar -->
-        <aside class="sidebar-container bg-sidebar-bg fixed left-0 top-16 bottom-0 overflow-y-auto shadow-xl z-10">
-            <div class="p-4 border-b border-gray-700">
-                <h2 class="text-white text-lg font-semibold mb-2">Company Profiles</h2>
-                <input 
-                    type="text" 
-                    id="sidebarSearchFilter" 
-                    placeholder="Search companies..." 
-                    class="w-full px-3 py-2 text-sm text-gray-900 bg-gray-200 border border-gray-600 rounded-lg focus:outline-none"
-                >
-                <div class="mt-2 flex items-center">
-                    <input type="checkbox" id="sidebarTargetFilter" class="rounded text-primary focus:ring-primary">
-                    <label for="sidebarTargetFilter" class="ml-2 text-sm text-gray-300">Show Targets Only</label>
-                </div>
+        <!-- START: Sidebar (company_sidebar.js will target this) -->
+        <aside id="companySidebar" class="sidebar-container bg-sidebar-bg text-white shadow-xl flex flex-col no-scrollbar overflow-y-auto">
+            <!-- CRITICAL FIX: Added required sidebar structure -->
+            <div class="p-4 flex flex-col space-y-4">
+                <button id="createNewCompanyBtn" class="bg-indigo-500 text-white p-2 rounded-lg font-semibold hover:bg-indigo-400 transition duration-150 flex items-center justify-center">
+                    <span data-lucide="plus" class="w-5 h-5 mr-2"></span>
+                    New Company
+                </button>
+                <input type="text" id="sidebarSearchFilter" placeholder="Search companies..." class="p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 border border-gray-600 focus:ring-primary focus:border-primary">
+                <select id="sidebarTargetFilter" class="p-2 rounded-lg bg-gray-700 text-white border border-gray-600 focus:ring-primary focus:border-primary">
+                    <option value="all">All Companies</option>
+                    <option value="targets">My Targets</option>
+                </select>
             </div>
-            <ul id="companyList" class="divide-y divide-gray-700 p-2">
-                <!-- Company links will be injected here by company_sidebar.js -->
-                <li class="p-4 text-gray-400 italic text-sm text-center" id="loadingMessage">Loading companies...</li>
+            <!-- This is where the company list goes -->
+            <ul id="companyList" class="flex-1 overflow-y-auto p-2 space-y-1">
+                <li class="p-3 text-sm text-gray-400">Loading companies...</li>
             </ul>
         </aside>
-        <!-- END: Company Sidebar -->
-
+        <!-- END: Sidebar -->
 
         <!-- START: Main Content Area -->
-        <div class="main-content flex-1 p-6 lg:p-10">
-
-            <!-- Header Section -->
-            <header class="mb-8 border-b pb-4">
-                <h1 class="text-3xl font-extrabold text-gray-900" id="companyNameDisplay">Company Management</h1>
-                <p class="text-sm text-gray-500" id="companyIdDisplay">ID: N/A</p>
-                <div id="statusMessage" role="alert" class="mt-4 opacity-0 h-0 transition-opacity duration-300"></div>
-            </header>
+        <div class="main-content p-8 lg:p-10 bg-gray-50 flex flex-col">
             
-            <!-- Initial Placeholder Message -->
-            <div id="initialPlaceholder" class="bg-white p-8 rounded-xl shadow-lg text-center border border-dashed border-gray-300">
-                <i data-lucide="building-2" class="w-12 h-12 text-gray-400 mx-auto mb-4"></i>
-                <h2 class="text-xl font-semibold text-gray-700">Select a Company</h2>
-                <p class="text-gray-500 mt-2">Please select a company from the sidebar to the left to view and manage its profile, raw names, and contacts.</p>
+            <!-- Toast Notification Container -->
+            <div id="toastContainer"></div>
+
+            <!-- START: Placeholder Content -->
+            <!-- This is visible when no company is selected (i.e., no companyId in URL) -->
+            <div id="initialPlaceholder" class="flex flex-col items-center justify-center h-full text-gray-500 text-center p-10 bg-white rounded-xl shadow-lg">
+                <span data-lucide="building-2" class="w-16 h-16 mb-4 text-primary"></span>
+                <h2 class="text-2xl font-semibold text-gray-800 mb-2">Select a Company</h2>
+                <p class="mb-6 max-w-md">Please choose a company from the sidebar to view or edit its profile, or click "New Company" to create a new one.</p>
+                <button id="createNewCompanyBtnPlaceholder" class="bg-primary text-white px-6 py-2 rounded-lg font-medium shadow-md hover:bg-indigo-700 transition duration-150 flex items-center">
+                    <span data-lucide="plus" class="w-5 h-5 mr-2"></span>
+                    Create New Company
+                </button>
             </div>
+            <!-- END: Placeholder Content -->
 
+            <!-- START: Management Content -->
+            <!-- CRITICAL: This MUST start hidden and is shown by management.js when a companyId is present -->
+            <div id="managementContent" class="hidden"> 
 
-            <!-- Management Content (Hidden by default, shown when companyId is present) -->
-            <div id="managementContent" class="space-y-12 hidden">
+                <!-- Profile Header -->
+                <header class="mb-8 flex justify-between items-center pb-4 border-b border-gray-200">
+                    <h1 id="profileTitle" class="text-3xl font-bold text-gray-900 truncate">Company Profile</h1>
+                    <div class="flex space-x-3">
+                        <button id="deleteProfileButton" class="bg-error text-white px-4 py-2 rounded-lg font-medium shadow-md hover:bg-red-600 transition duration-150 flex items-center hidden">
+                            <span data-lucide="trash-2" class="w-5 h-5 mr-2"></span>
+                            Delete Profile
+                        </button>
+                        <button id="saveProfileButton" class="bg-primary text-white px-6 py-2 rounded-lg font-medium shadow-md hover:bg-indigo-700 transition duration-150 flex items-center">
+                            <span data-lucide="save" class="w-5 h-5 mr-2"></span>
+                            <span id="saveProfileButtonText">Save Changes</span>
+                        </button>
+                    </div>
+                </header>
 
-                <!-- 1. Company Profile Form -->
-                <section class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-                        <i data-lucide="briefcase" class="w-6 h-6 mr-3 text-primary"></i> Company Profile
-                    </h2>
+                <!-- Profile Form -->
+                <section class="bg-white p-6 md:p-8 rounded-xl shadow-lg mb-8">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-6 border-b pb-3">Company Details</h2>
                     <form id="companyForm" class="space-y-6">
-                        
-                        <!-- Row 1: Name and Headquarters -->
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            
+                            <!-- Company Name -->
                             <div>
-                                <label for="companyName" class="form-label block text-sm font-medium text-gray-700">Company Name</label>
-                                <input type="text" id="companyName" name="company_name_clean" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                                <label for="company_name_clean" class="block text-sm font-medium text-gray-700 mb-1">Official Company Name <span class="text-error">*</span></label>
+                                <input type="text" id="company_name_clean" name="company_name_clean" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150" placeholder="e.g., Acme Corporation">
                             </div>
+
+                            <!-- Headquarters -->
                             <div>
-                                <label for="headquarters" class="block text-sm font-medium text-gray-700">Headquarters</label>
-                                <input type="text" id="headquarters" name="headquarters" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
+                                <label for="headquarters" class="block text-sm font-medium text-gray-700 mb-1">Headquarters Location</label>
+                                <input type="text" id="headquarters" name="headquarters" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150" placeholder="e.g., San Francisco, CA">
+                            </div>
+
+                            <!-- Employee Size -->
+                            <div>
+                                <label for="size_employees" class="block text-sm font-medium text-gray-700 mb-1">Employee Count</label>
+                                <input type="number" id="size_employees" name="size_employees" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150" placeholder="e.g., 500">
+                            </div>
+
+                            <!-- Annual Revenue -->
+                            <div>
+                                <label for="annual_revenue" class="block text-sm font-medium text-gray-700 mb-1">Annual Revenue (Value)</label>
+                                <input type="number" id="annual_revenue" name="annual_revenue" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150" placeholder="e.g., 50">
                             </div>
                         </div>
 
-                        <!-- Row 2: Website and Target Interest -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Revenue Scale & Target Checkbox (Single row, complex layout) -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+                            <!-- Revenue Scale Dropdown -->
                             <div>
-                                <label for="website_url" class="block text-sm font-medium text-gray-700">Website URL</label>
-                                <input type="url" id="website_url" name="website_url" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
-                            </div>
-                            <div class="flex items-center pt-5">
-                                <input type="checkbox" id="targetInterest" name="target_interest" class="rounded text-primary focus:ring-primary h-5 w-5">
-                                <label for="targetInterest" class="ml-3 block text-sm font-medium text-gray-700">Target Interest (Active pursuit)</label>
-                            </div>
-                        </div>
-
-                        <!-- Row 3: Size and Revenue -->
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div>
-                                <label for="size_employees" class="block text-sm font-medium text-gray-700">Employees (Size)</label>
-                                <input type="number" id="size_employees" name="size_employees" min="0" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
-                            </div>
-                            <div>
-                                <label for="annual_revenue" class="block text-sm font-medium text-gray-700">Annual Revenue (Value)</label>
-                                <input type="number" id="annual_revenue" name="annual_revenue" step="0.1" min="0" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
-                            </div>
-                            <div>
-                                <label for="revenue_scale" class="block text-sm font-medium text-gray-700">Revenue Scale</label>
-                                <select id="revenue_scale" name="revenue_scale" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3">
-                                    <option value="K">Thousands (K)</option>
-                                    <option value="M">Millions (M)</option>
-                                    <option value="B">Billions (B)</option>
+                                <label for="revenue_scale" class="block text-sm font-medium text-gray-700 mb-1">Revenue Scale</label>
+                                <select id="revenue_scale" name="revenue_scale" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                                    <option value="">Select Scale</option>
+                                    <option value="M">Million (M)</option>
+                                    <option value="B">Billion (B)</option>
                                 </select>
                             </div>
+                            <!-- Is Target Checkbox -->
+                            <div class="flex items-center pt-3 md:pt-0">
+                                <input id="is_target" name="is_target" type="checkbox" class="h-5 w-5 text-primary border-gray-300 rounded focus:ring-primary">
+                                <label for="is_target" class="ml-3 block text-sm font-medium text-gray-700">Is this a primary target company?</label>
+                            </div>
                         </div>
 
-                        <!-- Row 4: Notes -->
+                        <!-- Notes -->
                         <div>
-                            <label for="notes" class="block text-sm font-medium text-gray-700">Internal Notes</label>
-                            <textarea id="notes" name="notes" rows="3" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3"></textarea>
+                            <label for="notes" class="block text-sm font-medium text-gray-700 mb-1">Notes / Key Details</label>
+                            <textarea id="notes" name="notes" rows="3" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150" placeholder="Any important insights or deal-breakers..."></textarea>
                         </div>
-                        
-                        <!-- Submit Button -->
-                        <div class="pt-4 border-t">
-                            <button 
-                                type="submit" 
-                                id="saveProfileBtn" 
-                                class="inline-flex justify-center items-center py-3 px-6 border border-transparent shadow-md text-sm font-medium rounded-lg text-white bg-primary hover:bg-indigo-700 transition duration-150 ease-in-out"
-                            >
-                                <i data-lucide="save" class="w-5 h-5 inline mr-2"></i> Save Profile
-                            </button>
-                        </div>
-
                     </form>
                 </section>
 
-                <!-- 2. Raw Names Table -->
-                <section class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                        <i data-lucide="fingerprint" class="w-6 h-6 mr-3 text-warning"></i> Raw Names/Aliases
-                    </h2>
-                    <p class="text-sm text-gray-500 mb-4">Names used by sources that map to this company.</p>
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Raw Name
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody id="rawNamesTableBody" class="bg-white divide-y divide-gray-200">
-                                <!-- Raw Names will be injected here by management.js -->
-                            </tbody>
-                        </table>
+                <!-- Related Data View Section (Hidden/Shown along with the main form) -->
+                <section id="profileViewSection">
+                    
+                    <!-- Raw Names/Aliases -->
+                    <div class="bg-white p-6 md:p-8 rounded-xl shadow-lg mb-8">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                            <span data-lucide="tag" class="w-5 h-5 mr-2 text-primary"></span>
+                            Raw Names / Aliases
+                        </h2>
+                        <ul id="rawNamesList" class="divide-y divide-gray-100">
+                            <!-- Raw names will be injected here by management.js -->
+                        </ul>
                     </div>
-                </section>
 
-                <!-- 3. Contacts Table -->
-                <section class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                        <i data-lucide="users-2" class="w-6 h-6 mr-3 text-success"></i> Associated Contacts
-                    </h2>
-                    <p class="text-sm text-gray-500 mb-4">Known contacts connected to this company.</p>
-                    <div class="overflow-x-auto">
+                    <!-- Contacts Table -->
+                    <div class="bg-white p-6 md:p-8 rounded-xl shadow-lg mb-8 overflow-x-auto">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                            <span data-lucide="users" class="w-5 h-5 mr-2 text-primary"></span>
+                            Associated Contacts
+                        </h2>
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Name
-                                    </th>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Position
-                                    </th>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Email
-                                    </th>
-                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Connected Date
-                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                 </tr>
                             </thead>
                             <tbody id="contactsTableBody" class="bg-white divide-y divide-gray-200">
@@ -222,10 +219,10 @@
 
             </div>
             <!-- END: Management Content -->
-            
+
         </div>
         <!-- END: Main Content Area -->
-        
+
     </main>
 
     <!-- START: Script loading section -->
@@ -237,15 +234,16 @@
         var __firebase_config = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
         var __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
     </script>
-    
+
     <!-- 2. Load all scripts as modules -->
-    <script type="module" src="core-utils.js"></script> 
+    <!-- CRITICAL: The main application boot sequence must be the only script that runs on DOM load -->
+    <script type="module" src="core-utils.js"></script>
     <script type="module" src="navbar.js"></script>
-    <script type="module" src="company_sidebar.js"></script> 
-    
-    <!-- CRITICAL: The main application logic -->
+    <script type="module" src="company_sidebar.js"></script>
+
+    <!-- CRITICAL: The main application logic and boot orchestrator -->
     <script type="module" src="management.js"></script>
-    
+
     <!-- END: Script loading section -->
 
 </body>

@@ -141,8 +141,12 @@ export async function fetchWithGuard(url, method, operationName, options = {}) {
             
             // Build headers, including Authorization
             const headers = {
+                // START OF CRITICAL FIX: Set application/json as the default Content-Type for all requests.
+                // This resolves the 415 error for APIs that rely on this header being present.
+                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
-                ...options.headers,
+                // User-supplied headers are spread *last* to allow them to override the default Content-Type.
+                ...options.headers, 
             };
             
             // Handle content type for JSON vs FormData
@@ -150,22 +154,25 @@ export async function fetchWithGuard(url, method, operationName, options = {}) {
             const isFormData = body instanceof FormData;
             const isObjectBody = typeof body === 'object' && body !== null && !isFormData;
 
+            // --- CRITICAL LOGIC ---
             if (isObjectBody) {
+                // If body is a raw object, stringify it. Content-Type is already set above.
                 body = JSON.stringify(body);
-                headers['Content-Type'] = 'application/json';
-            } else if (!isFormData) {
-                 // For GET/DELETE requests with no body, we can still assume JSON response
-                 headers['Content-Type'] = 'application/json'; 
-            } else {
-                 // Do not set Content-Type for FormData, browser will set it with boundary
+            } else if (isFormData) {
+                 // For FormData, the browser sets the Content-Type header with the boundary. 
+                 // We must explicitly delete the default Content-Type.
                  delete headers['Content-Type'];
             }
+            // For other cases (e.g., GET/DELETE or already-stringified body), we rely on the default 
+            // Content-Type set above, or any override in options.headers.
+            // --- END OF CRITICAL LOGIC ---
             
             // Perform the fetch call
             const response = await fetch(url, {
                 method: method,
                 headers: headers,
                 body: body,
+                // Do not spread headers or body from options, as we have already processed them.
                 ...options
             });
 

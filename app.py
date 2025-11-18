@@ -1,5 +1,5 @@
 # FILENAME: app.py | LAST EDITED: 2025-10-27 (DictCursor fix)
-# FILENAME: app.py | LAST EDITED: 2025-10-27 (DictCursor fix)
+# FILENAME: app.py | LAST EDITED: 2025-11-17 ( added error logging )
 from flask import Flask, g, jsonify, request, send_file, send_from_directory # Added send_from_directory
 import psycopg2
 import psycopg2.extras # Needed for dictionary cursor
@@ -7,6 +7,7 @@ import os
 import uuid
 from datetime import datetime
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import BadRequest # <-- IMPORTANT NEW IMPORT
 import io # Used in download_document logic (not strictly needed if using send_file)
 import mimetypes # <--- endpoint 9: Required for guess_extension (fixes NameError)
 from functools import wraps
@@ -349,6 +350,31 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 # --- END OF CORRECTED AUTHENTICATION BLOCK ---
+
+@app.route('/api/db_test', methods=['GET'])
+def db_test():
+    """Checks database connection health."""
+    conn = None
+    try:
+        # CRITICAL LINE: Check the DB connection credentials/config here.
+        conn = get_db_connection() 
+        
+        # If connection succeeds, execute a simple query
+        cur = conn.cursor()
+        cur.execute('SELECT 1;')
+        cur.fetchone()
+        
+        # If all succeeds, close and report success.
+        conn.close() 
+        print("[LOG] DB Connection Test: SUCCESS")
+        return jsonify({"status": "success", "message": "Database connection and simple query successful!"})
+    except Exception as e:
+        # If the failure is here, this print statement MUST show up.
+        print(f"[LOG] DB Connection Test FAILED: {e}") 
+        import traceback
+        traceback.print_exc()
+        if conn: conn.close()
+        return jsonify({"status": "error", "message": f"DB Connection Failed. Check server logs."}), 500
 # --- API Endpoints ---
 
 @app.route('/')
@@ -1316,6 +1342,7 @@ def get_company_contacts(company_id):
             t1.email_address,
             t1.position,
             t1.connected_on,
+            t1.url as linkedIn_url,
             t2.raw_name AS associated_raw_name
         FROM contacts t1
         JOIN company_name_mapping t2 ON t1.company = t2.raw_name
@@ -1561,7 +1588,205 @@ def search_company_profiles():
     finally:
         if conn:
             conn.close()
-## MAIN (Included for optional local development testing)
+
+# --- Helper Function to Clean String Inputs (Must be defined outside the route) ---
+def clean_string_input(value):
+    """
+    Converts incoming empty strings (or strings containing only whitespace) 
+    to None, ensuring they are stored as NULL in the database.
+    """
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    return value
+
+# ----------------------------------------------------------------------
+# 17. POST /api/companies (Create New Company Profile)
+# ----------------------------------------------------------------------
+@app.route('/api/companies', methods=['POST'])
+@mock_auth_required 
+def create_new_company_profile(): 
+    """
+    Creates a new company profile, expecting the documented FLAT JSON payload 
+    and ensuring all empty optional fields are converted to NULL before insertion.
+    """
+    conn = None
+    try:
+        # Step 1: Parse the incoming JSON payload.
+        # This is the line that will throw a BadRequest if the client sends an empty body 
+        # but claims Content-Type: application/json.
+        data = request.get_json(silent=False) 
+        
+        if not data:
+            return jsonify({"status": "error", "message": "Request body must be valid JSON and cannot be empty (or check Content-Type header). "}), 400
+
+        # --- REQUIRED FIELD CHECK ---
+        company_name_clean = data.get('company_name_clean')
+        if not company_name_clean:
+            return jsonify({"status": "error", "message": "The field 'company_name_clean' is required."}), 400
+
+        # --- Data Extraction and Alignment ---
+        
+        # 1. Boolean field
+        target_interest = data.get('is_target', False) 
+        
+        # 2. Numeric fields (handled for None/null)
+        size_employees = data.get('size_employees')
+        annual_revenue = data.get('annual_revenue')
+
+        size_employees_final = int(size_employees) if size_employees is not None else None
+        annual_revenue_final = float(annual_revenue) if annual_revenue is not None else None
+        
+        # 3. String fields: APPLY CLEAN-UP FUNCTION
+        headquarters = clean_string_input(data.get('headquarters'))
+        revenue_scale = clean_string_input(data.get('revenue_scale'))
+        notes = clean_string_input(data.get('notes'))
+        
+        # 4. Database Connection and Execution 
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        sql = """
+            INSERT INTO companies (
+                company_name_clean, target_interest, size_employees, 
+                annual_revenue, headquarters, notes, revenue_scale
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s
+            ) RETURNING company_id;
+        """
+        
+        cur.execute(sql, (
+            company_name_clean, 
+            target_interest, 
+            size_employees_final, 
+            annual_revenue_final, 
+            headquarters, 
+            notes, 
+            revenue_scale
+        ))
+        
+        new_company_id = cur.fetchone()[0]
+        
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Company profile created successfully.",
+            "company_id": new_company_id
+        }), 201
+
+    except BadRequest as e:
+        # Catches the JSON parsing failure or empty body
+        print(f"[CLIENT ERROR] Bad Request (JSON Parse Fail): {e}")
+        return jsonify({"status": "error", "message": "Invalid JSON format or empty request body. Ensure Content-Type is 'application/json' and the body is valid."}), 400
+
+    except psycopg2.Error as e:
+        if conn: conn.rollback()
+        # Catches the DB constraint violation (the likely original 500 error)
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"[DB ERROR] in create_new_company_profile: {db_error_detail}") 
+        return jsonify({"status": "error", "message": "Database error creating company profile. Check constraints."}), 500
+        
+    except Exception as e:
+        if conn: conn.rollback()
+        import traceback
+        traceback.print_exc()
+        print(f"[GENERAL ERROR] in create_new_company_profile: {e}") 
+        return jsonify({"status": "error", "message": "An unexpected server error occurred."}), 500
+        
+    finally:
+        if conn: conn.close()
+# ----------------------------------------------------------------------
+# 18. DELETE COMPANY PROFILE (Soft Delete: Nullify FKs, then Delete)
+# ----------------------------------------------------------------------
+@app.route('/api/companies/<int:company_id>', methods=['DELETE'])
+@mock_auth_required
+def soft_delete_company_profile(company_id):
+    """
+    Performs a soft delete on a company profile:
+    1. Nullifies company_id in related tables (company_name_mapping, applications).
+    2. Deletes the company record from the 'companies' table.
+    
+    Returns HTTP 204 No Content on success.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn:
+            # Handles the scenario where the database connection fails immediately
+            raise Exception("Database connection failed.")
+            
+        cur = conn.cursor()
+
+        # Start Transaction: crucial for ensuring all three steps succeed or fail together
+        conn.autocommit = False
+
+        # --- Action 1: UPDATE company_name_mapping (Set FK to NULL) ---
+        # Disassociate raw names from the company profile to preserve historical raw data.
+        sql_map_nullify = """
+            UPDATE company_name_mapping
+            SET company_id = NULL
+            WHERE company_id = %s;
+        """
+        cur.execute(sql_map_nullify, (company_id,))
+
+
+        # --- Action 2: UPDATE applications (Set FK to NULL) ---
+        # Disassociate application records from the company profile to preserve job history.
+        # The 'applications' table is included as per the new spec requirements.
+        sql_app_nullify = """
+            UPDATE applications
+            SET company_id = NULL
+            WHERE company_id = %s;
+        """
+        cur.execute(sql_app_nullify, (company_id,))
+
+        
+        # --- Action 3: DELETE from companies table ---
+        # The actual deletion of the standardized profile record.
+        sql_delete_company = """
+            DELETE FROM companies
+            WHERE company_id = %s;
+        """
+        cur.execute(sql_delete_company, (company_id,))
+        
+        # Check if the company record was deleted
+        if cur.rowcount == 0:
+            conn.rollback()
+            # If nothing was deleted, the ID didn't exist (404 Not Found)
+            return jsonify({
+                "status": "error",
+                "message": f"Company profile {company_id} not found or already deleted."
+            }), 404
+
+        # Commit Transaction: All three steps succeeded
+        conn.commit()
+
+        # Success: HTTP 204 No Content
+        return '', 204
+
+    except psycopg2.Error as e:
+        if conn: conn.rollback()
+        # Extract primary error message for better logging
+        db_error_detail = getattr(e.diag, 'message_primary', 'A database error occurred.')
+        print(f"PostgreSQL Error in soft_delete_company_profile: {db_error_detail}")
+        return jsonify({
+            "status": "error", 
+            "message": "A database error occurred during the soft deletion process."
+        }), 500
+        
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"General Error in soft_delete_company_profile: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": "An unexpected error occurred during profile disassociation."
+        }), 500
+        
+    finally:
+        # Clean up connection state and close it
+        if conn:
+            conn.autocommit = True
+            conn.close()## MAIN (Included for optional local development testing)
 if __name__ == '__main__':
     # This is for local development only. Gunicorn is typically used in production.
     app.run(debug=True, port=5000)
