@@ -3,6 +3,7 @@
 from flask import Flask, g, jsonify, request, send_file, send_from_directory # Added send_from_directory
 import psycopg2
 import psycopg2.extras # Needed for dictionary cursor
+from psycopg2 import sql # <-- CRITICAL: This line is necessary for sql.SQL()
 import os
 import uuid
 from datetime import datetime
@@ -1786,7 +1787,396 @@ def soft_delete_company_profile(company_id):
         # Clean up connection state and close it
         if conn:
             conn.autocommit = True
-            conn.close()## MAIN (Included for optional local development testing)
+            conn.close()
+def get_or_create_job_title(cur, title_name: str) -> int:
+    """
+    FIXED LOGIC: Looks up or creates a job title globally by name, 
+    EXCLUDING company_id as requested.
+    
+    Args:
+        cur: The psycopg2 database cursor.
+        title_name: The raw job title string.
+
+    Returns:
+        The job_title_id (integer) of the existing or newly created job title.
+    """
+    # 1. Look up the job title based ONLY on the title_name (Global lookup)
+    sql_check = sql.SQL("SELECT job_title_id FROM job_titles WHERE title_name = %s")
+    cur.execute(sql_check, (title_name,))
+    
+    result = cur.fetchone()
+    if result:
+        return result[0]
+
+    # 2. Job title not found, so create a new one
+    now = datetime.now()
+    
+    # Standardized_title is set to title_name as a default placeholder
+    sql_insert = sql.SQL("""
+        INSERT INTO job_titles (title_name, standardized_title, created_at, updated_at)
+        VALUES (%s, %s, %s, %s)
+        RETURNING job_title_id
+    """)
+    
+    # NOTE: No company_id is passed or used here.
+    cur.execute(sql_insert, (title_name, title_name, now, now))
+    
+    new_job_title_id = cur.fetchone()[0]
+    return new_job_title_id
+
+# ----------------------------------------------------------------------
+# 19. APPLICATION UPDATE API: PUT /api/applications/<uuid:application_id>
+# ----------------------------------------------------------------------
+@app.route('/api/applications/<uuid:application_id>', methods=['PUT'])
+@mock_auth_required
+def update_application_19(application_id):
+    """
+    Endpoint 19.0: Updates an existing job application.
+    """
+    conn = None
+    cur = None
+    application_id_str = str(application_id)
+    user_id = g.user_id
+    
+    print(f"--- DEBUG 19.0 START UPDATE for {application_id_str} by User {user_id} ---")
+
+    try:
+        data = request.get_json(silent=False)
+        if not data:
+            raise BadRequest("Request body must be valid JSON.")
+
+        conn, cur = get_db_cursor()
+        if conn is None:
+             return jsonify({"status": "error", "message": "Database connection failed"}), 500
+
+        # --- 1. Ownership and Existence Check ---
+        # Ensure the application exists AND belongs to the authenticated user.
+        sql_check_owner = sql.SQL("SELECT job_title_id FROM applications WHERE application_id = %s AND user_id = %s")
+        cur.execute(sql_check_owner, (application_id_str, user_id))
+        
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({"status": "error", "message": f"Application {application_id_str} not found or unauthorized for user {user_id}."}), 404
+
+        # --- 2. Process Input Fields ---
+        
+        # Fields that map directly to columns
+        title_name = data.get('title_name')
+        date_applied_str = data.get('date_applied')
+        current_status = data.get('current_status')
+        
+        job_title_id = None
+        
+        # If the title is being updated, handle the job_titles lookup
+        if title_name:
+            print(f"DEBUG 19.0: Processing new/updated job title: {title_name}")
+            # CALLS THE CORRECTED GLOBAL HELPER FUNCTION
+            job_title_id = get_or_create_job_title(cur, title_name)
+        
+        # Date Validation
+        date_applied_sql = None
+        if date_applied_str:
+            try:
+                # Assuming YYYY-MM-DD format
+                date_applied_sql = datetime.strptime(date_applied_str, '%Y-%m-%d').date().isoformat()
+            except ValueError:
+                return jsonify({"status": "error", "message": "Invalid date format for 'date_applied'. Expected YYYY-MM-DD."}), 400
+            
+        # --- 3. Construct and Execute Dynamic Update Query ---
+        
+        updates = []
+        params = []
+        
+        # Conditionally add fields to update
+        if job_title_id is not None:
+            updates.append(sql.SQL("job_title_id = %s"))
+            params.append(job_title_id)
+            
+        if date_applied_sql is not None:
+            updates.append(sql.SQL("date_applied = %s"))
+            params.append(date_applied_sql)
+            
+        if current_status is not None:
+            # IMPORTANT: Ensure 'current_status' value is a valid ENUM value in your database!
+            updates.append(sql.SQL("current_status = %s"))
+            params.append(current_status)
+            
+        # If no fields were provided in the body, nothing to update
+        if not updates:
+            conn.close()
+            return jsonify({"status": "success", "message": "No updatable fields provided in request body."}), 200
+
+        # Add mandatory updated_at timestamp
+        updates.append(sql.SQL("updated_at = NOW()"))
+        
+        # Construct the final SQL command
+        sql_update = sql.SQL("""
+            UPDATE applications
+            SET {}
+            WHERE application_id = %s AND user_id = %s
+        """).format(sql.SQL(', ').join(updates))
+        
+        params.append(application_id_str)
+        params.append(user_id)
+        
+        cur.execute(sql_update, params)
+        conn.commit()
+
+        # Check if any row was actually updated
+        if cur.rowcount == 0:
+             # This is defensive, as the ownership check should have prevented it.
+             return jsonify({"status": "error", "message": "Update committed, but no rows were modified."}), 500
+
+
+        return jsonify({
+            "status": "success",
+            "message": f"Application {application_id_str} updated successfully."
+        }), 200
+
+    except psycopg2.Error as e:
+        if conn: conn.rollback()
+        # CRITICAL: This extracts the specific error message from PostgreSQL
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"\n[CRITICAL DB ERROR IN PUT /api/applications (Endpoint 19.0)]:") 
+        print(f"SQLSTATE: {getattr(e.diag, 'sqlstate', 'N/A')}")
+        print(f"DETAIL: {db_error_detail}\n") 
+        
+        # Return the specific detail to the user to help debug
+        return jsonify({
+            "status": "error", 
+            "message": "Database error during application update.",
+            "detail": db_error_detail
+        }), 500
+        
+    except BadRequest as e:
+        print(f"[CLIENT ERROR] Bad Request: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 400
+        
+    except Exception as e:
+        if conn: conn.rollback()
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": "An unexpected server error occurred."}), 500
+        
+    finally:
+        if conn: conn.close()
+        
+
+# ----------------------------------------------------------------------
+# 20. DELETE /api/applications/{application_id} (Delete Application)
+# ----------------------------------------------------------------------
+@app.route('/api/applications/<uuid:application_id>', methods=['DELETE'])
+@mock_auth_required
+def delete_application(application_id):
+    """
+    Endpoint 20: Permanently deletes a job application, its document metadata, 
+    and all associated physical files from the UPLOAD_FOLDER.
+    """
+    user_id = g.user_id
+    application_id_str = str(application_id)
+    conn = None
+    cur = None
+    files_deleted_count = 0
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # 1. Ownership Check and Document Retrieval
+        # We need the document_id (which serves as the secure filename) to delete the physical files.
+        sql_select_documents = """
+            SELECT jd.document_id 
+            FROM applications a
+            LEFT JOIN job_documents jd ON a.application_id = jd.application_id
+            WHERE a.application_id = %s AND a.user_id = %s;
+        """
+        cur.execute(sql_select_documents, (application_id_str, user_id))
+        document_records = cur.fetchall()
+        
+        # Check for existence/ownership before proceeding with deletions
+        if not document_records and cur.rowcount == 0:
+            # Check if application exists (by attempting to fetch the main app record)
+            cur.execute("SELECT user_id FROM applications WHERE application_id = %s;", (application_id_str,))
+            app_owner_record = cur.fetchone()
+            
+            if not app_owner_record:
+                conn.close()
+                return jsonify({"status": "error", "message": f"Application {application_id_str} not found."}), 404
+            
+            if app_owner_record[0] != user_id:
+                conn.close()
+                return jsonify({"status": "error", "message": "Unauthorized access. This application does not belong to your account."}), 403
+            
+            # If the app exists but has no documents, we continue to step 4 (delete application record).
+
+        # 2. Delete Physical Files (CRITICAL ACTION)
+        for record in document_records:
+            document_id = str(record[0]) # document_id is the secure filename
+            file_to_delete = os.path.join(UPLOAD_FOLDER, document_id)
+            
+            try:
+                if os.path.exists(file_to_delete):
+                    os.remove(file_to_delete)
+                    files_deleted_count += 1
+                else:
+                    # Log a warning but proceed with DB cleanup
+                    print(f"WARNING 20.0: File not found on disk: {file_to_delete}")
+            except Exception as file_e:
+                print(f"FILE SYSTEM ERROR 20.0: Could not delete file {file_to_delete}: {file_e}")
+                # Log the error but continue DB cleanup, as the file may be externally locked
+
+        # 3. Delete linked records from job_documents
+        sql_delete_docs = """
+            DELETE FROM job_documents
+            WHERE application_id = %s;
+        """
+        cur.execute(sql_delete_docs, (application_id_str,))
+
+        # 4. Delete the application record (user_id ensures ownership check)
+        sql_delete_app = """
+            DELETE FROM applications
+            WHERE application_id = %s AND user_id = %s;
+        """
+        cur.execute(sql_delete_app, (application_id_str, user_id))
+
+        if cur.rowcount == 0 and files_deleted_count == 0:
+            # Redundant check, but ensures if no records were touched (after prior checks), we fail
+            conn.rollback()
+            return jsonify({"status": "error", "message": f"Application {application_id_str} not found or unauthorized."}), 404
+        
+        # 5. Commit the transaction
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": f"Application {application_id_str} deleted successfully. {files_deleted_count} associated file(s) removed."
+        }), 200
+
+    except psycopg2.Error as e:
+        if conn: conn.rollback()
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in delete_application: {db_error_detail}")
+        return jsonify({"status": "error", "message": "Database error during application deletion."}), 500
+    except Exception as e:
+        if conn: conn.rollback()
+        traceback.print_exc()
+        print(f"General Error in delete_application: {e}")
+        # Return the generic server error message as specified in the docs.
+        return jsonify({"status": "error", "message": "An unexpected server error occurred during deletion."}), 500
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+# ----------------------------------------------------------------------
+# 21. GET /api/application/<uuid:application_id> (Retrieve Single Application)
+# ----------------------------------------------------------------------
+# FIX: Using the correct singular path '/api/application' with the UUID converter
+@app.route('/api/application/<uuid:application_id>', methods=['GET'])
+@mock_auth_required
+def get_single_application(application_id):
+    """
+    Endpoint 21: Retrieves all stored data for a single job application identified by its UUID.
+    This includes nested company, job title, and document information.
+    """
+    # The user ID is set by the authentication decorator
+    user_id = g.user_id 
+    application_id_str = str(application_id)
+    conn = None
+    cur = None
+    
+    try:
+        # The database connection is likely where the error is occurring if the SQL is valid.
+        conn = get_db_connection() 
+        # Use DictCursor for easy access to column names
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # SQL query confirmed valid via psql test
+        sql_query = """
+            SELECT
+                a.application_id,
+                a.user_id,
+                a.date_applied,
+                a.current_status,
+                
+                jt.job_title_id,
+                jt.title_name,
+                
+                c.company_id,
+                c.company_name_clean,
+                
+                jd.document_id,
+                jd.document_type,
+                jd.original_filename
+            FROM applications a
+            LEFT JOIN job_titles jt ON a.job_title_id = jt.job_title_id
+            LEFT JOIN companies c ON a.company_id = c.company_id
+            LEFT JOIN job_documents jd ON a.application_id = jd.application_id
+            WHERE a.application_id = %s AND a.user_id = %s;
+        """
+        cur.execute(sql_query, (application_id_str, user_id))
+        records = cur.fetchall()
+
+        if not records:
+            # Check for 403/404 based on ownership/existence
+            cur_check = conn.cursor()
+            cur_check.execute("SELECT user_id FROM applications WHERE application_id = %s;", (application_id_str,))
+            app_owner_record = cur_check.fetchone()
+            cur_check.close()
+            
+            if app_owner_record:
+                # Application exists but user ID does not match the owner
+                return jsonify({"status": "error", "message": "Unauthorized access. This application does not belong to your account."}), 403
+            else:
+                # Application ID does not exist
+                return jsonify({"status": "error", "message": f"Application {application_id_str} not found."}), 404
+
+        # 1. Aggregate documents and extract the primary application record
+        app_record = records[0]
+        documents = []
+        for record in records:
+            if record['document_id'] is not None:
+                documents.append({
+                    "document_id": str(record['document_id']),
+                    "document_type": record['document_type'],
+                    "original_filename": record['original_filename']
+                })
+        
+        # 2. Format date (handling None safely, though the database suggests it's present)
+        date_applied_str = app_record['date_applied'].isoformat() if app_record['date_applied'] else None
+        
+        # 3. Structure the final response object
+        application = {
+            "application_id": str(app_record['application_id']),
+            "user_id": app_record['user_id'],
+            "date_applied": date_applied_str,
+            "current_status": app_record['current_status'],
+            "job_posting_url": None, # Set to None, as it was not in the SELECT list
+            "company_info": {
+                "company_id": app_record['company_id'],
+                "company_name_clean": app_record['company_name_clean']
+            } if app_record['company_id'] else None,
+            "job_title_info": {
+                "job_title_id": app_record['job_title_id'],
+                "title_name": app_record['title_name']
+            } if app_record['job_title_id'] else None,
+            "documents": documents
+        }
+
+        return jsonify({"status": "success", "application": application}), 200
+
+    except psycopg2.Error as e:
+        # Log the specific psycopg2 error message to help debug connection/transaction issues
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error (psycopg2) in get_single_application: {db_error_detail}. Full Error: {e}")
+        # Return generic 500
+        return jsonify({"status": "error", "message": "Database error retrieving application details."}), 500
+    except Exception as e:
+        traceback.print_exc()
+        print(f"General Error in get_single_application: {e}")
+        return jsonify({"status": "error", "message": "An unexpected server error occurred."}), 500
+    finally:
+        if cur: cur.close()
+        # CRITICAL: Always close the connection
+        if conn: conn.close()
+        ## MAIN (Included for optional local development testing)
 if __name__ == '__main__':
     # This is for local development only. Gunicorn is typically used in production.
     app.run(debug=True, port=5000)

@@ -111,6 +111,14 @@ export async function initializeServices() {
  * @param {object} [options={}] - Standard fetch options (headers, body, etc.).
  * @returns {Promise<object>} - The parsed JSON response data.
  */
+/**
+ * Guarded fetch function to call external APIs with built-in error handling and exponential backoff.
+ * @param {string} url - The API endpoint URL.
+ * @param {string} method - HTTP method ('GET', 'POST', etc.).
+ * @param {string} operationName - Descriptive name for logging.
+ * @param {object} [options={}] - Standard fetch options (headers, body, etc.).
+ * @returns {Promise<object>} - The parsed JSON response data.
+ */
 export async function fetchWithGuard(url, method, operationName, options = {}) {
     const MAX_RETRIES = 3;
     let lastError = null;
@@ -139,40 +147,48 @@ export async function fetchWithGuard(url, method, operationName, options = {}) {
         try {
             console.log(`[API] Attempt ${i + 1}/${MAX_RETRIES}: ${method} ${url}`);
             
-            // Build headers, including Authorization
-            const headers = {
-                // START OF CRITICAL FIX: Set application/json as the default Content-Type for all requests.
-                // This resolves the 415 error for APIs that rely on this header being present.
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                // User-supplied headers are spread *last* to allow them to override the default Content-Type.
-                ...options.headers, 
-            };
-            
-            // Handle content type for JSON vs FormData
+            // Handle body manipulation FIRST
             let body = options.body;
             const isFormData = body instanceof FormData;
             const isObjectBody = typeof body === 'object' && body !== null && !isFormData;
 
-            // --- CRITICAL LOGIC ---
-            if (isObjectBody) {
-                // If body is a raw object, stringify it. Content-Type is already set above.
-                body = JSON.stringify(body);
-            } else if (isFormData) {
-                 // For FormData, the browser sets the Content-Type header with the boundary. 
-                 // We must explicitly delete the default Content-Type.
-                 delete headers['Content-Type'];
+            // --- START OF STABLE HEADER FIX ---
+            // Fixes the issue where browser fetch API overrides Content-Type to text/plain
+            
+            // 1. Initialize headers with only Authorization
+            let requestHeaders = {
+                'Authorization': `Bearer ${token}`
+            };
+
+            // 2. Merge user-provided headers from options.headers
+            if (options.headers) {
+                // Use spread operator to merge, allowing user headers to override auth
+                requestHeaders = { ...requestHeaders, ...options.headers };
             }
-            // For other cases (e.g., GET/DELETE or already-stringified body), we rely on the default 
-            // Content-Type set above, or any override in options.headers.
-            // --- END OF CRITICAL LOGIC ---
+
+            if (isObjectBody) {
+                // If body is a raw object, stringify it
+                body = JSON.stringify(body);
+                // 3. Explicitly set Content-Type header AFTER stringifying
+                requestHeaders['Content-Type'] = 'application/json';
+            } else if (isFormData) {
+                // 4. Do not set Content-Type for FormData, browser will set it with boundary
+                delete requestHeaders['Content-Type'];
+                // Check for lower-case version as well for robustness
+                delete requestHeaders['content-type']; 
+            } else if (!requestHeaders['Content-Type'] && !requestHeaders['content-type']) {
+                 // 5. Default to application/json if no Content-Type was explicitly provided and it's not FormData
+                 // This resolves the 415 error for requests that were previously missing the header (e.g., GET)
+                 requestHeaders['Content-Type'] = 'application/json';
+            }
+            // --- END OF STABLE HEADER FIX ---
             
             // Perform the fetch call
             const response = await fetch(url, {
                 method: method,
-                headers: headers,
+                headers: requestHeaders, // Use the carefully constructed headers object
                 body: body,
-                // Do not spread headers or body from options, as we have already processed them.
+                // Spread remaining options (timeout, signal, etc.)
                 ...options
             });
 
@@ -190,7 +206,8 @@ export async function fetchWithGuard(url, method, operationName, options = {}) {
 
             if (!response.ok) {
                 // API returned a non-200 status code
-                throw new Error(data?.message || `API Error (${response.status}): ${operationName} failed.`);
+                const errorMessage = data?.message || (data?.error ? JSON.stringify(data.error) : null) || `API Error (${response.status}): ${operationName} failed.`;
+                throw new Error(errorMessage);
             }
 
             return data; // Success
