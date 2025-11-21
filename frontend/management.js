@@ -1,8 +1,7 @@
 // FILENAME: management.js | Core logic for the Company Management View.
-// Version: v1.17 - FIX: Implemented "Max Force JSON Fix." The request body is now 
-// explicitly JSON.stringified, and the 'Content-Type' header is explicitly added
-// for POST/PUT requests, overriding the utility's unreliable auto-detection 
-// to ensure the server correctly processes the request.
+// Version: v1.23 - CRITICAL FIX: Modified handleSaveProfile to dynamically map the
+// 'target_interest' checkbox value to 'is_target' for POST (Create) operations
+// and 'target_interest' for PUT (Update) operations, resolving the API inconsistency.
 
 // --- Import Only Exported Utilities from core-utils.js ---
 import { 
@@ -14,23 +13,16 @@ import {
 import { initSidebar } from './company_sidebar.js';
 
 // --- MOCK AUTHENTICATION WORKAROUND ---
-// Only includes Authorization. For POST/PUT with a body, Content-Type will be 
-// explicitly added in handleSaveProfile() to ensure the body is processed correctly.
 const MOCK_AUTH_HEADERS = {
     'Authorization': 'Bearer MOCK_TOKEN',
 };
 
 // --- API Endpoints ---
 const API_URLS = {
-    // API 3.0 & 4.0: GET/PUT /api/companies/{companyId} (Base profile endpoint)
     PROFILE: (id) => `/api/companies/${id}`,
-    // ASSUMED API for Creation: POST /api/companies
     CREATE: '/api/companies',
-    // API 12.0: GET /api/companies/{companyId}/raw_names
     RAW_NAMES: (id) => `/api/companies/${id}/raw_names`,
-    // API 13.0: GET /api/companies/{companyId}/contacts
     CONTACTS: (id) => `/api/companies/${id}/contacts`,
-    // API 5.0: DELETE /api/companies/{companyId}
     DELETE: (id) => `/api/companies/${id}`,
 };
 
@@ -63,7 +55,7 @@ const toastContainer = document.getElementById('toastContainer');
  * @param {'success'|'error'|'warning'} type The type of notification (for color/icon).
  */
 function showToast(message, type = 'success') {
-    if (!toastContainer) return; // Defensive check
+    if (!toastContainer) return; 
 
     const iconMap = {
         success: 'check-circle',
@@ -137,7 +129,9 @@ function populateCompanyForm(data) {
     const annualRevenueInput = document.getElementById('annual_revenue');
     const revenueScaleInput = document.getElementById('revenue_scale');
     const notesInput = document.getElementById('notes');
-    const isTargetCheckbox = document.getElementById('is_target'); 
+    
+    // Look for either the correct ID or the old ID for compatibility
+    const targetInterestCheckbox = document.getElementById('target_interest') || document.getElementById('is_target'); 
 
     // Populate the form fields. Use || '' to gracefully handle null/undefined data.
     if (companyNameCleanInput) companyNameCleanInput.value = data.company_name_clean || '';
@@ -147,8 +141,10 @@ function populateCompanyForm(data) {
     if (revenueScaleInput) revenueScaleInput.value = data.revenue_scale || '';
     if (notesInput) notesInput.value = data.notes || '';
     
-    // Populate the checkbox using the API field name (assuming it comes back as 'is_target')
-    if (isTargetCheckbox) isTargetCheckbox.checked = !!data.is_target; 
+    // Populate the checkbox using the correct API field name (target_interest)
+    // !!data.target_interest ensures the value is a boolean (true/false)
+    // The API response will use target_interest, so we check against that.
+    if (targetInterestCheckbox) targetInterestCheckbox.checked = !!data.target_interest; 
     
     // Update the header title and button state
     if (profileTitle) profileTitle.textContent = data.company_name_clean || 'Company Profile';
@@ -162,7 +158,7 @@ function populateCompanyForm(data) {
  * @param {Array<string|Object>} rawNames - Array of raw name strings or objects.
  */
 function renderRawNames(rawNames) {
-    if (!rawNamesList) return; // Defensive check
+    if (!rawNamesList) return; 
     rawNamesList.innerHTML = ''; // Clear previous list
     
     if (!Array.isArray(rawNames) || rawNames.length === 0) {
@@ -172,13 +168,11 @@ function renderRawNames(rawNames) {
 
     rawNames.forEach(rawName => {
         let nameText = 'N/A';
-        let idDisplay = ''; // Default to no ID display
+        let idDisplay = ''; 
 
         if (typeof rawName === 'string') {
-            // Case 1: Raw name is a string (based on your curl output)
             nameText = rawName;
         } else if (typeof rawName === 'object' && rawName !== null) {
-            // Case 2: Raw name is an object (fallback/legacy or alternate API design)
             nameText = rawName.raw_name || 'N/A'; 
             const idText = rawName.mapping_id || 'N/A';
             if (idText !== 'N/A') {
@@ -186,7 +180,6 @@ function renderRawNames(rawNames) {
             }
         }
         
-        // Skip rendering if the name text is still N/A
         if (nameText === 'N/A') return;
 
         const listItem = document.createElement('li');
@@ -204,9 +197,8 @@ function renderRawNames(rawNames) {
  * @param {Array<Object>} contacts - Array of contact objects.
  */
 function renderContacts(contacts) {
-    if (!contactsTableBody) return; // Defensive check
+    if (!contactsTableBody) return; 
     contactsTableBody.innerHTML = ''; // Clear previous contacts
-    // Use Array.isArray for robust check
     if (!Array.isArray(contacts) || contacts.length === 0) {
         contactsTableBody.innerHTML = `
             <tr>
@@ -217,15 +209,12 @@ function renderContacts(contacts) {
     }
 
     contacts.forEach(contact => {
-        // Use the new, specific API field names
         const name = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'N/A';
         const title = contact.position || 'N/A';
         const email = contact.email_address || 'N/A';
-        // For status, we will infer 'Active' if 'connected_on' is present, otherwise 'Pending'.
         const status = contact.connected_on ? 'Active' : 'Pending';
         
-        // Determine status styling
-        let statusClass = 'text-yellow-700 bg-yellow-100'; // Default to Pending
+        let statusClass = 'text-yellow-700 bg-yellow-100'; 
         if (status.toLowerCase() === 'active') statusClass = 'text-green-700 bg-green-100';
 
         const row = document.createElement('tr');
@@ -254,7 +243,6 @@ function renderContacts(contacts) {
 export async function loadCompanyData(id) {
     currentCompanyId = id;
 
-    // Immediately hide placeholder and show content area while waiting for fetch
     if (initialPlaceholder) initialPlaceholder.classList.add('hidden');
     if (managementContent) managementContent.classList.remove('hidden');
     
@@ -264,7 +252,6 @@ export async function loadCompanyData(id) {
             API_URLS.PROFILE(id), 
             'GET', 
             `Fetch Company Profile ${id}`,
-            // Pass MOCK_AUTH_HEADERS inside the options object
             { headers: MOCK_AUTH_HEADERS }
         );
 
@@ -273,7 +260,6 @@ export async function loadCompanyData(id) {
             API_URLS.RAW_NAMES(id), 
             'GET', 
             `Fetch Raw Names for ${id}`,
-            // Pass MOCK_AUTH_HEADERS inside the options object
             { headers: MOCK_AUTH_HEADERS }
         );
         
@@ -281,7 +267,6 @@ export async function loadCompanyData(id) {
             API_URLS.CONTACTS(id), 
             'GET', 
             `Fetch Contacts for ${id}`,
-            // Pass MOCK_AUTH_HEADERS inside the options object
             { headers: MOCK_AUTH_HEADERS }
         );
 
@@ -293,10 +278,7 @@ export async function loadCompanyData(id) {
 
         // 3. Populate Form and Render Related Data
         
-        // Use the strict key provided by documentation (company)
         const profileData = profileResponse?.company || {};
-        
-        // Ensure data is an array before attempting to render
         const rawNamesData = Array.isArray(rawNamesResponse?.raw_names) ? rawNamesResponse.raw_names : [];
         const contactsData = Array.isArray(contactsResponse?.contacts) ? contactsResponse.contacts : [];
 
@@ -304,7 +286,6 @@ export async function loadCompanyData(id) {
         console.log('Raw Names Data received:', rawNamesData); 
         // -----------------
 
-        // populateCompanyForm handles visibility based on data presence
         populateCompanyForm(profileData); 
         renderRawNames(rawNamesData);
         renderContacts(contactsData);
@@ -312,12 +293,10 @@ export async function loadCompanyData(id) {
     } catch (error) {
         console.error(`Error loading company data for ID ${id}:`, error);
         showToast(`Failed to load company profile. ${error.message}`, 'error');
-        // If loading fails, reset to "Create New" state
         handleCreateNewProfile(); 
         if (profileTitle) profileTitle.textContent = `Error Loading ID ${id}`;
     }
 
-    // Ensure icons are created after dynamic content is added
     if (typeof lucide !== 'undefined') {
         lucide.createIcons();
     }
@@ -325,28 +304,39 @@ export async function loadCompanyData(id) {
 
 
 /**
- * Collects form data and serializes it into a sparse API payload structure, 
- * omitting keys with empty values to avoid JSON formatting issues, EXCEPT for booleans.
+ * Collects form data and serializes it into a sparse API payload structure.
  * @returns {Object} The JSON payload data collected from the form.
  */
 function serializeFormData() {
-    // CRITICAL FIX: Check if companyForm exists before querying its elements
     if (!companyForm) return {};
     
     const data = {};
+    
+    // V1.22/V1.23: Explicitly and defensively read the checkbox state. 
+    // We use the front-end key 'target_interest' temporarily, which will be mapped later.
+    const targetInterestCheckbox = document.getElementById('target_interest') || document.getElementById('is_target');
+    
+    if (targetInterestCheckbox) {
+        // Guarantee the key and a boolean value are added to the data object immediately.
+        // We use the 'target_interest' key here because that is what the API uses for GET/PUT responses.
+        data['target_interest'] = targetInterestCheckbox.checked; 
+        console.log(`[Form Serialization] Checkbox state captured (key: target_interest): ${data['target_interest']}`);
+    } else {
+        data['target_interest'] = false;
+        console.log('[Form Serialization] Checkbox element not found. Defaulting target_interest to false.');
+    }
+    
+
+    // Now, iterate over the REST of the inputs, select, and textareas
     const inputs = companyForm.querySelectorAll('input, select, textarea');
 
     inputs.forEach(input => {
-        // Only proceed if the input has a name for API mapping
+        // Skip the checkbox here, as we handled it explicitly above.
+        if (input.type === 'checkbox') {
+            return; 
+        }
         if (!input.name) return;
 
-        if (input.type === 'checkbox') {
-            // CRITICAL: Checkbox value (is_target) is always included as a boolean
-            data[input.name] = input.checked;
-            return;
-        }
-
-        // Get value and trim, which covers non-checkbox/non-number fields
         const value = input.value.trim();
         
         // Skip the key entirely if the value is empty
@@ -356,13 +346,11 @@ function serializeFormData() {
 
         if (input.type === 'number') {
             const numValue = parseFloat(value);
-            // Include only if it's a valid, finite number
             if (isNaN(numValue) || !isFinite(numValue)) {
                 return; 
             }
             data[input.name] = numValue;
         } else {
-            // Include non-empty strings/select values
             data[input.name] = value;
         }
     });
@@ -376,22 +364,16 @@ function serializeFormData() {
  * @param {Event} event - The form submission event.
  */
 async function handleSaveProfile(event) {
-    // Prevent the default browser action (needed for form submit and button click)
     event.preventDefault(); 
 
-    // Determine if this is a POST (Create) or PUT (Update) operation
     const isUpdate = currentCompanyId !== null;
     const method = isUpdate ? 'PUT' : 'POST';
     const url = isUpdate ? API_URLS.PROFILE(currentCompanyId) : API_URLS.CREATE;
-    // Ensure 'Creating' is spelled correctly
     const actionName = isUpdate ? 'Updat' : 'Creat'; 
 
-    // Get the raw data object from the form (this is sparse, missing empty fields)
     const rawData = serializeFormData();
     
-    // Basic validation for required field
     if (!rawData.company_name_clean) {
-        // Show explicit error and return
         showToast('Validation Error: Official Company Name is required to save a profile.', 'error');
         return; 
     }
@@ -399,11 +381,14 @@ async function handleSaveProfile(event) {
     let payloadObject;
     
     if (!isUpdate) {
-        // 1. Build the non-sparse flat object for creation (v1.12 logic retained)
+        // --- POST (Create) path: Requires all mandatory fields and uses 'is_target' ---
+        
         const flatObject = {
             company_name_clean: rawData.company_name_clean || '',
-            is_target: !!rawData.is_target, // Must be a boolean
-            // Ensure all other expected keys are present, even if empty/null
+            
+            // CRITICAL V1.23 FIX: Map the internal 'target_interest' key to the API's 'is_target' key for POST.
+            is_target: rawData.target_interest, 
+            
             headquarters: rawData.headquarters || '',
             size_employees: rawData.size_employees === undefined ? null : rawData.size_employees,
             annual_revenue: rawData.annual_revenue === undefined ? null : rawData.annual_revenue,
@@ -411,73 +396,56 @@ async function handleSaveProfile(event) {
             notes: rawData.notes || '',
         };
 
-        // This flat payload is what the backend expects for POST
         payloadObject = flatObject; 
         
     } else {
-        // For updates (PUT), the sparse payload is preferred and remains flat.
+        // --- PUT (Update) path: Uses the internal 'target_interest' key as required by the API. ---
         payloadObject = rawData; 
     }
 
-    // DEBUG: Log the final object we are passing to fetchWithGuard
     console.log(`[Form Submit] Method: ${method}, URL: ${url}`);
-    console.log(`[Form Submit] FINAL JS OBJECT Payload (Flat for POST):`, payloadObject);
+    console.log(`[Form Submit] FINAL JS OBJECT Payload:`, payloadObject);
 
-    // Capture the original state of the button text
     const originalButtonText = isUpdate ? 'Save Changes' : 'Create Profile';
 
     try {
         if (saveProfileButton) saveProfileButton.disabled = true;
-        // Uses 'Creating' or 'Updating' correctly
         if (saveProfileButtonText) saveProfileButtonText.textContent = `${actionName}ing...`; 
 
-        // --- CRITICAL FIX v1.17: Maximum Force JSON Configuration ---
-        // Since the utility's automatic handling is failing to set Content-Type 
-        // reliably, we explicitly set the header and manually stringify the body 
-        // to guarantee the request matches the successful cURL format.
         const fetchOptions = {
             headers: {
-                // Combine Authorization from MOCK_AUTH_HEADERS
                 'Authorization': MOCK_AUTH_HEADERS.Authorization,
-                // Explicitly set Content-Type to match the successful cURL
                 'Content-Type': 'application/json',
             },
-            // Manually stringify the body to ensure it is sent as a raw string 
-            // of JSON, just like in the cURL command.
             body: JSON.stringify(payloadObject), 
         };
-        // -----------------------------------------------------------
 
         const response = await fetchWithGuard(
             url,
             method,
-            `${actionName}e Company Profile`, // Passed to fetchWithGuard for error logging
-            fetchOptions // PASSING SINGLE OPTIONS OBJECT
+            `${actionName}e Company Profile`, 
+            fetchOptions 
         );
 
         showToast(`Company profile ${actionName.toLowerCase()}ed successfully!`, 'success');
         
-        // If creation was successful, redirect to the management view with the new ID
-        // The API returns the new company_id, possibly nested
         const newCompanyId = response.company?.company_id || response.data?.company_id || response.company_id;
         
         if (!isUpdate && newCompanyId) {
-            // Navigate to the new profile page to view/edit it
+            // Redirect to the newly created company's profile
             window.location.assign(`management.html?companyId=${newCompanyId}`);
             return;
         }
         
-        // For updates, just reload the data
         if (isUpdate) {
+            // Reload the current company's data
             loadCompanyData(currentCompanyId);
         }
 
     } catch (error) {
         console.error(`Error during ${actionName}e operation:`, error);
-        // Ensure error toast uses the action name
         showToast(`Failed to ${actionName.toLowerCase()}e profile: ${error.message}`, 'error');
     } finally {
-        // CRITICAL: Ensure button state is always reset, even after success or failure
         if (saveProfileButton) saveProfileButton.disabled = false;
         if (saveProfileButtonText) saveProfileButtonText.textContent = originalButtonText;
     }
@@ -488,7 +456,7 @@ async function handleSaveProfile(event) {
  * Sets the UI state for creating a new profile.
  */
 function handleCreateNewProfile() {
-    currentCompanyId = null; // CRITICAL: Clear the current ID to force POST on save
+    currentCompanyId = null; 
 
     // 1. Clear Form and Headings
     if (companyForm) companyForm.reset(); 
@@ -504,12 +472,11 @@ function handleCreateNewProfile() {
     `;
 
     // 3. Update Button/Section Visibility
-    if (deleteProfileButton) deleteProfileButton.classList.add('hidden'); // Hide delete button for new profiles
-    if (initialPlaceholder) initialPlaceholder.classList.add('hidden'); // Hide placeholder
-    if (managementContent) managementContent.classList.remove('hidden'); // Show content form
-    if (profileViewSection) profileViewSection.classList.add('hidden'); // Hide Raw Names/Contacts section
+    if (deleteProfileButton) deleteProfileButton.classList.add('hidden'); 
+    if (initialPlaceholder) initialPlaceholder.classList.add('hidden'); 
+    if (managementContent) managementContent.classList.remove('hidden'); 
+    if (profileViewSection) profileViewSection.classList.add('hidden'); 
     
-    // Ensure icons are created
     if (typeof lucide !== 'undefined') {
         lucide.createIcons();
     }
@@ -524,16 +491,13 @@ async function handleDeleteProfile() {
         return;
     }
     
-    // CRITICAL: Ensure deleteProfileButton exists before accessing its classes/text
     if (!deleteProfileButton) return; 
 
-    // IMPORTANT: Since alert() and confirm() are forbidden, we'll implement a simple
-    // confirmation logic here by temporarily disabling the button and asking for a double-click
+    // Confirmation logic (two-click delete)
     if (!deleteProfileButton.classList.contains('confirm-delete')) {
         deleteProfileButton.innerHTML = `<span data-lucide="trash-2" class="w-5 h-5 mr-2"></span> Click Again to Confirm Delete`;
         deleteProfileButton.classList.add('confirm-delete');
         
-        // Reset confirmation state after 3 seconds
         setTimeout(() => {
             if (deleteProfileButton) {
                 deleteProfileButton.innerHTML = `<span data-lucide="trash-2" class="w-5 h-5 mr-2"></span> Delete Profile`;
@@ -554,13 +518,11 @@ async function handleDeleteProfile() {
             API_URLS.DELETE(currentCompanyId),
             'DELETE',
             `Delete Company Profile ${currentCompanyId}`,
-            // Pass MOCK_AUTH_HEADERS inside the options object
             { headers: MOCK_AUTH_HEADERS }
         );
 
         showToast('Company profile deleted successfully.', 'success');
         
-        // After deletion, navigate back to the default (placeholder) state
         window.location.assign('management.html');
 
     } catch (error) {
@@ -584,7 +546,7 @@ async function handleDeleteProfile() {
 async function initManagement() {
     console.log('Initializing Management View...');
 
-    // 1. Initialize Firebase services (used by core-utils and fetchWithGuard)
+    // 1. Initialize Firebase services 
     const authResult = await initializeServices();
     const isAuthReady = authResult && authResult.isAuthReady; 
     
@@ -597,14 +559,12 @@ async function initManagement() {
     const companyId = urlParams.get('companyId');
     
     // 3. Initialize the REUSABLE SIDEBAR
-    // Note: initSidebar calls the API to populate the list
     initSidebar({ 
         activeCompanyId: companyId,
         targetPage: 'management.html' 
     });
 
     // 4. Attach Event Listeners
-    // Attaches listener for 'Enter' key press on form fields
     if (companyForm) {
         console.log('[DOM Check] companyForm element found. Attaching submit listener.');
         companyForm.addEventListener('submit', handleSaveProfile);
@@ -612,8 +572,6 @@ async function initManagement() {
         console.error('[DOM Check] ERROR: companyForm element (ID: companyForm) not found. Save handler cannot be attached.');
     }
     
-    // CRITICAL: Attach click listener directly to the button. This guarantees 
-    // the save/create function runs, bypassing native form submission issues.
     if (saveProfileButton) {
         console.log('[DOM Check] saveProfileButton found. Attaching direct click listener.');
         saveProfileButton.addEventListener('click', handleSaveProfile);
@@ -621,11 +579,9 @@ async function initManagement() {
         console.error('[DOM Check] ERROR: saveProfileButton element not found.');
     }
 
-    // Attach click handler to both "Create New" buttons
     if (createNewCompanyBtn) { 
         createNewCompanyBtn.addEventListener('click', handleCreateNewProfile);
     }
-    // Corrected variable name from v1.11 typo
     if (createNewCompanyBtnPlaceholder) { 
         createNewCompanyBtnPlaceholder.addEventListener('click', handleCreateNewProfile);
     }
@@ -635,22 +591,17 @@ async function initManagement() {
     
     // 5. Load data if a company is selected
     if (companyId) {
-        // CRITICAL: Immediately show the management view container when an ID is present
-        // This ensures the view is shown even if the API data is empty/fails, 
-        // allowing the form to display for "New Profile" state if necessary.
         if (initialPlaceholder) initialPlaceholder.classList.add('hidden');
         if (managementContent) managementContent.classList.remove('hidden');
 
         await loadCompanyData(companyId);
     } else {
-        // If no ID is in the URL, show the placeholder
         if (initialPlaceholder) initialPlaceholder.classList.remove('hidden');
         if (managementContent) managementContent.classList.add('hidden');
-        // If no ID, ensure we are in the "Create New" state when the DOM loads
         handleCreateNewProfile(); 
     }
 
-    // 6. Initialize icons (for any static or initial content)
+    // 6. Initialize icons
     if (typeof lucide !== 'undefined') {
         lucide.createIcons();
     }
@@ -659,6 +610,5 @@ async function initManagement() {
 // Call the main initialization function when the DOM is ready
 document.addEventListener('DOMContentLoaded', initManagement);
 
-// CRITICAL EXPORT: Export loadCompanyData so the sidebar can trigger a reload 
-// when the user navigates between companies by clicking a sidebar link.
+// CRITICAL EXPORT
 window.loadCompanyData = loadCompanyData;
