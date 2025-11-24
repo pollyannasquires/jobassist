@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | JobAssist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide icons are essential for the dashboard interface -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], },
+                    colors: {
+                        'primary': '#4f46e5', // indigo-600
+                        'success': '#10b981', // emerald-500
+                        'error': '#ef4444',   // red-500
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
+        /* Ensure main content is below the fixed navbar */
+        .main-content {
+            padding-top: 64px; /* Matches h-16 navbar height */
+        }
+        /* Style for sortable columns */
+        .sortable-header {
+            cursor: pointer;
+            user-select: none;
+            display: inline-flex;
+            align-items: center;
+        }
+        .sort-icon {
+            margin-left: 0.25rem;
+            width: 1rem;
+            height: 1rem;
+            transition: transform 0.2s;
+        }
+        /* Style for active sort direction */
+        .sort-active .sort-icon {
+            color: #4f46e5; /* primary color */
+        }
+    </style>
+</head>
+<body>
+    <!-- The navbar will be injected here by navbar.js -->
+    <header id="navbar-placeholder"></header>
+
+    <!-- START: MAIN APPLICATION CONTAINER -->
+    <main class="main-content min-h-screen">
+        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <h1 class="text-3xl font-extrabold text-gray-900 border-b pb-3 mb-6 flex items-center">
+                    <i data-lucide="layout-dashboard" class="w-7 h-7 mr-3 text-primary"></i>
+                    Application Dashboard
+                </h1>
+
+                <!-- Loading and Error Indicators (Targeted by application_dashboard.js) -->
+                <div id="loadingIndicator" class="hidden text-center py-12">
+                    <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
+                    <p class="mt-4 text-gray-600">Loading all applications...</p>
+                </div>
+
+                <div id="errorDisplay" class="hidden p-4 text-sm font-medium text-red-700 bg-red-100 rounded-lg" role="alert">
+                    <!-- Error message will be injected here by the JS -->
+                </div>
+                
+                <!-- START: Application Table Container -->
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <!-- Sortable by Date Applied -->
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <div class="sortable-header group" data-sort-key="application_date" data-sort-direction="desc" onclick="window.handleSortClick('application_date')">
+                                        Date Applied
+                                        <i data-lucide="arrow-down-up" id="sort-icon-application_date" class="sort-icon w-4 h-4 ml-1 text-gray-400 group-hover:text-gray-600 transition"></i>
+                                    </div>
+                                </th>
+                                <!-- Sortable by Company Name -->
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <div class="sortable-header group" data-sort-key="company_name_clean" data-sort-direction="none" onclick="window.handleSortClick('company_name_clean')">
+                                        Company
+                                        <i data-lucide="arrow-down-up" id="sort-icon-company_name_clean" class="sort-icon w-4 h-4 ml-1 text-gray-400 group-hover:text-gray-600 transition"></i>
+                                    </div>
+                                </th>
+                                <!-- Sortable by Job Title -->
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <div class="sortable-header group" data-sort-key="job_title" data-sort-direction="none" onclick="window.handleSortClick('job_title')">
+                                        Job Title
+                                        <i data-lucide="arrow-down-up" id="sort-icon-job_title" class="sort-icon w-4 h-4 ml-1 text-gray-400 group-hover:text-gray-600 transition"></i>
+                                    </div>
+                                </th>
+                                <!-- Fixed Column -->
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <!-- Fixed Column -->
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="applicationTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- Table rows will be rendered here by application_dashboard.js -->
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-gray-500">
+                                    Loading applications...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- END: Application Table Container -->
+
+            </div>
+        </div>
+    </main>
+    <!-- END: MAIN APPLICATION CONTAINER -->
+
+    <!-- START: Script loading section -->
+    <!-- 1. CRITICAL FIX: Define the required Firebase/Canvas globals using 'var' -->
+    <script>
+        var __app_id = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        var __firebase_config = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        var __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    </script>
+    
+    <!-- 2. Load all scripts as modules -->
+    <!-- The order matters: core-utils provides the base, then navbar, then the specific page logic -->
+    <script type="module" src="core-utils.js"></script> 
+    <script type="module" src="navbar.js"></script>
+    <script type="module" src="application_dashboard.js"></script> 
+
+    <script>
+        // Initialize lucide icons for elements that are not dynamically inserted
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        });
+    </script>
+    <!-- END: Script loading section -->
+</body>
+</html>

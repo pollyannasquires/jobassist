@@ -1,7 +1,6 @@
 // FILENAME: management.js | Core logic for the Company Management View.
-// Version: v1.23 - CRITICAL FIX: Modified handleSaveProfile to dynamically map the
-// 'target_interest' checkbox value to 'is_target' for POST (Create) operations
-// and 'target_interest' for PUT (Update) operations, resolving the API inconsistency.
+// Version: v1.24 - FIX: Restored the hyperlink for contact names in the table, 
+// using the 'linkedin_url' from the API response to enable redirection.
 
 // --- Import Only Exported Utilities from core-utils.js ---
 import { 
@@ -143,7 +142,6 @@ function populateCompanyForm(data) {
     
     // Populate the checkbox using the correct API field name (target_interest)
     // !!data.target_interest ensures the value is a boolean (true/false)
-    // The API response will use target_interest, so we check against that.
     if (targetInterestCheckbox) targetInterestCheckbox.checked = !!data.target_interest; 
     
     // Update the header title and button state
@@ -217,10 +215,15 @@ function renderContacts(contacts) {
         let statusClass = 'text-yellow-700 bg-yellow-100'; 
         if (status.toLowerCase() === 'active') statusClass = 'text-green-700 bg-green-100';
 
+        // V1.24 FIX: Create a linked name if linkedin_url is present
+        const linkedName = contact.linkedin_url 
+            ? `<a href="${contact.linkedin_url}" target="_blank" class="text-indigo-600 hover:text-indigo-900 font-semibold transition duration-150">${name}</a>`
+            : name;
+
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50 transition duration-100';
         row.innerHTML = `
-            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${name}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${linkedName}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${title}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${email}</td>
             <td class="px-6 py-4 whitespace-nowrap">
@@ -312,7 +315,7 @@ function serializeFormData() {
     
     const data = {};
     
-    // V1.22/V1.23: Explicitly and defensively read the checkbox state. 
+    // Explicitly and defensively read the checkbox state. 
     // We use the front-end key 'target_interest' temporarily, which will be mapped later.
     const targetInterestCheckbox = document.getElementById('target_interest') || document.getElementById('is_target');
     

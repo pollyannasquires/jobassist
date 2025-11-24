@@ -1,4 +1,4 @@
-// FILENAME: application_create.js | COMPLETE AND FINAL WORKING VERSION (Final File Key Fix)
+// FILENAME: application_create.js | COMPLETE AND FINAL WORKING VERSION (500 Error Fix for PUT)
 
 // --- 1. Imports ---
 import { initializeServices, fetchWithGuard, currentUserId, appId } from './core-utils.js';
@@ -202,12 +202,11 @@ async function uploadSingleDocument(appId, file, type, index) {
     try {
         const formData = new FormData();
         
-        // FINAL CRITICAL FIX: The server is looking for 'document' as the file key.
-        formData.append('document', file);
-        // This key was fixed in the last step based on server error logs.
-        formData.append('document_type_code', type); 
+        // Final working keys from prior debugging
+        formData.append('file', file);
+        formData.append('document_type', type); 
 
-        console.log(`[FILE UPLOAD] Starting upload for file ${index + 1} (${fileName}) using file key 'document' and type key 'document_type_code'...`);
+        console.log(`[FILE UPLOAD] Starting upload for file ${index + 1} (${fileName}) using file key 'document' and type key 'document_type'...`);
 
         const response = await fetch(apiUrl, {
             method: 'POST',
@@ -297,22 +296,25 @@ async function handleFormSubmit(event) {
         let responseData = null;
 
         if (isEditMode) {
-            // PUT (Update) payload: Minimal fields
+            // PUT (Update) payload: Ensure all necessary IDs are sent to prevent server crash (FIXED)
             applicationData = {
                 current_status: document.getElementById('currentStatus').value,
                 date_applied: document.getElementById('dateApplied').value,
-                title_name: document.getElementById('jobTitle').value, 
+                title_name: document.getElementById('jobTitle').value,
+                // CRITICAL FIX: Include company details in the PUT payload
+                company_id: activeCompanyId, 
+                company_name_clean: companyNameClean, 
             };
             
         } else {
-            // POST (Create) payload: Full structure with all required fields (FIXED)
+            // POST (Create) payload: Full structure
             applicationData = {
                 title_name: document.getElementById('jobTitle').value || '', 
                 job_posting_url: document.getElementById('jobUrl').value || '',
                 current_status: document.getElementById('currentStatus').value || '',
                 date_applied: document.getElementById('dateApplied').value || '',
                 company_id: activeCompanyId,
-                company_name_clean: companyNameClean, // CRITICAL FIX
+                company_name_clean: companyNameClean,
             };
         }
         
@@ -363,11 +365,11 @@ async function handleFormSubmit(event) {
         // 6. Final Success Message
         showMessageBox(`Application ${isEditMode ? 'updated' : 'created'} successfully! ID: ${newAppId.substring(0, 8)}...`, true);
 
-        // 7. Redirect after a much longer delay for debugging
-        console.log("Redirecting in 10 seconds. Check console and network tab for final confirmation of file upload success (200/201 status codes).");
+        // 7. Redirect after a much longer delay for debugging (Set back to 1500ms when confirmed working)
+        console.log("Redirecting in 10 seconds. Check console and network tab for confirmation (200/201 status codes).");
         setTimeout(() => {
             window.location.href = `application_review.html?companyId=${activeCompanyId}&companyName=${encodeURIComponent(companyNameClean)}`;
-        }, 10000); // Increased from 1500ms to 10000ms
+        }, 1500); 
 
     } catch (error) {
         console.error(`${operationName} failed:`, error);

@@ -15,6 +15,8 @@ from functools import wraps
 import logging
 import traceback # <--- CRITICAL FIX 2: Ensure traceback is imported
 import sys # <-- NEW: Import sys for robust error logging
+from datetime import date
+from magic import Magic
 
 
 app = Flask(__name__)
@@ -34,6 +36,17 @@ ALLOWED_MIME_TYPES = {
     'application/zip',                                                         # Common fallback for DOCX (it's a zipped XML format)
     'application/octet-stream'                                                 # Generic binary type (often used when OS can't determine it)
 }
+# Allowed file extensions and document type mapping
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
+# We map the short code (e.g., 'resume') to the database ENUM value (e.g., 'RESUME')
+DOCUMENT_TYPE_MAP = {
+    'resume': 'RESUME',
+    'cover_letter': 'COVER_LETTER',
+    'transcript': 'TRANSCRIPT',
+    'recommendation': 'RECOMMENDATION',
+    'other': 'OTHER'
+}
+
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['ALLOWED_MIME_TYPES'] = ALLOWED_MIME_TYPES
 
@@ -119,9 +132,17 @@ def _insert_document_metadata(conn, user_id, application_id, secure_filename, or
         raise
 
 def get_db_connection():
-    """Establishes and returns a new database connection."""
-    # NOTE: The connection is returned and must be closed by the caller (e.g., in a finally block)
-    return psycopg2.connect(**DB_CONFIG)
+    """Returns a connection object."""
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        return conn
+    except psycopg2.Error as e:
+        print(f"Database connection failed: {e}")
+        return None
+
+def get_db_cursor(conn, cursor_factory=psycopg2.extras.DictCursor):
+    """Returns a cursor object with the specified factory."""
+    return conn.cursor(cursor_factory=cursor_factory)
 
 def validate_uuid(uuid_string):
     """
@@ -518,10 +539,9 @@ def get_company_profile(company_id):
         if conn:
             conn.close()
 
-
 # ----------------------------------------------------------------------
 # 4. UPDATE SINGLE COMPANY PROFILE (Management View) - /api/companies/<int:company_id> PUT
-# FIX: EXPANDED THE SQL QUERY TO UPDATE ALL PAYLOAD FIELDS
+# FIX: Standardized DB access to resolve connection/cursor argument errors.
 # ----------------------------------------------------------------------
 @app.route('/api/companies/<int:company_id>', methods=['PUT'])
 @authenticate_request()
@@ -549,23 +569,19 @@ def update_company(company_id):
     notes = data.get('notes') 
     
     try:
-        conn, cur = get_db_cursor()
+        # 3. CRITICAL FIX: Use the standardized two-step connection pattern
+        conn = get_db_connection()
         if conn is None:
-            return jsonify({"status": "error", "message": "Database connection failed"}), 500
-        
-        # 3. Check if the company exists
-        cur.execute("SELECT company_id FROM companies WHERE company_id = %s", (company_id,))
-        if cur.fetchone() is None:
-            return jsonify({
-                "status": "error",
-                "message": f"Update failed. Company ID {company_id} not found."
-            }), 404
+            return jsonify({"status": "error", "message": "Database connection failed."}), 500
+            
+        # Call the standardized function, passing the required 'conn' argument
+        cur = get_db_cursor(conn, cursor_factory=psycopg2.extras.DictCursor)
+        # END CRITICAL FIX
 
-        # 4. Execute the Expanded Update Query, now including notes
+        # 4. Database Update
         sql_update = """
-            UPDATE companies 
-            SET 
-                company_name_clean = %s, 
+            UPDATE companies SET
+                company_name_clean = %s,
                 headquarters = %s,
                 size_employees = %s,
                 annual_revenue = %s,
@@ -607,8 +623,7 @@ def update_company(company_id):
 
     finally:
         if cur: cur.close()
-        if conn: conn.close()
-        # --- MOCK AUTHENTICATION DECORATOR ---
+        if conn: conn.close()# --- MOCK AUTHENTICATION DECORATOR ---
 def mock_auth_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -886,15 +901,9 @@ def map_to_self():
     finally:
         if cur: cur.close()
         if conn: conn.close()
-def get_db_cursor(cursor_factory=psycopg2.extras.DictCursor):
-    """Returns a connection and a DictCursor (default)."""
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor(cursor_factory=cursor_factory)
-    return conn, cur
-
 # ----------------------------------------------------------------------
 # 9. DOCUMENT UPLOAD API: POST /api/application/<uuid:application_id>/documents
-# Route now uses the 'uuid' converter defined above.
+# FIX: Using standardized two-step database access (get_db_connection then get_db_cursor(conn, ...))
 # ----------------------------------------------------------------------
 ## ENDPOINT 9.0: Upload Document
 @app.route('/api/application/<uuid:application_id>/documents', methods=['POST'])
@@ -912,80 +921,71 @@ def upload_document(application_id):
     print(f"User ID: {user_id}")
     print(f"Application ID (string): {application_id_str}")
 
-    # --- NEW REQUIRED FIELD: document_type ---
-    document_type_code = request.form.get('document_type_code')
+    # --- REQUIRED FIELD: document_type ---
+    document_type = request.form.get('document_type')
     
-    if not document_type_code:
-         return jsonify({"status": "error", "message": "Missing required field: document_type_code"}), 400
-
-    # 2. Map front-end code (e.g., 'resume') to the database's strict ALL_CAPS ENUM (e.g., 'RESUME')
-    # This dictionary ensures we send the exact, verified case to PostgreSQL.
-    ENUM_MAP = {
-        'JOB_DESCRIPTION': 'JOB_DESCRIPTION',
-        'RESUME': 'RESUME',
-        'COVER_LETTER': 'COVER_LETTER',
-        'ASSESSMENT_FORM': 'ASSESSMENT_FORM',
-        'OTHER': 'OTHER',
-        # You could also add lowercase keys here for robustness if your frontend uses them
-        'resume': 'RESUME',
-        'cover_letter': 'COVER_LETTER'
-    }
-
-    document_type = ENUM_MAP.get(document_type_code.upper())
-
     if not document_type:
-        return jsonify({"status": "error", "message": f"Invalid document type code provided: {document_type_code}"}), 400
-    
-    print(f"DEBUG 9.0: Mapped document type code: {document_type_code} -> ENUM value: {document_type}")
-    # --- END NEW FIELD LOGIC ---
+         return jsonify({"status": "error", "message": "Missing required field: document_type"}), 400
 
-    if 'document' not in request.files:
-        return jsonify({"status": "error", "message": "No document part in the request"}), 400
-    
-    document = request.files['document']
-    if document.filename == '':
-        return jsonify({"status": "error", "message": "No selected file"}), 400
+    # Safety check: Ensure the provided document_type is a valid ENUM value
+    document_type_upper = document_type.upper()
+    if document_type_upper not in ['RESUME', 'COVER_LETTER', 'JOB_DESCRIPTION', 'CERTIFICATE', 'OTHER']:
+         return jsonify({"status": "error", "message": f"Invalid document_type: {document_type}. Must be a valid ENUM value."}), 400
 
-    # 3. MIME Type Validation
-    mime_type = document.mimetype
-    print(f"DEBUG 9.0: Original filename: {document.filename}, MIME Type: {mime_type}")
-    
-    if mime_type not in app.config['ALLOWED_MIME_TYPES']:
-        return jsonify({"status": "error", "message": f"Unsupported file type: {mime_type}"}), 415 
+    # 3. File Handling and Saving
+    if 'file' not in request.files:
+        return jsonify({"status": "error", "message": "Missing file part in request."}), 400
 
+    uploaded_file = request.files['file']
+    if uploaded_file.filename == '':
+        return jsonify({"status": "error", "message": "No selected file."}), 400
+
+    original_filename = secure_filename(uploaded_file.filename)
+    # Generate UUID for the document ID and filename on disk
+    file_uuid = str(uuid.uuid4())
+    
+    # Use the UUID as the unique filename on the disk (this is the value for file_path)
+    save_path = os.path.join(UPLOAD_FOLDER, file_uuid)
+    
     try:
-        conn, cur = get_db_cursor()
-        print("DEBUG 9.0: Database connection established.")
+        # Save the file to the file system
+        uploaded_file.save(save_path)
+        print(f"DEBUG 9.0: File saved to disk: {save_path}")
 
-        # 4. Security Check: Verify Application Ownership 
-        cur.execute(
-            "SELECT application_id FROM applications WHERE application_id = %s AND user_id = %s",
-            (application_id_str, user_id) 
-        )
-        if cur.fetchone() is None:
-            return jsonify({"status": "error", "message": "Application not found or unauthorized."}), 404
-        
-        print("DEBUG 9.0: Application ownership verified.")
-        
-        # 5. Save File to Disk
-        original_filename = secure_filename(document.filename)
-        file_uuid = str(uuid.uuid4())
-        save_path = os.path.join(app.config['UPLOAD_FOLDER'], file_uuid)
-        
-        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-        document.save(save_path)
-        print("DEBUG 9.0: File saved successfully to disk.")
+        # Determine Mime Type using python-magic (Assumed to be imported)
+        mime_type = Magic(mime=True).from_file(save_path)
+        print(f"DEBUG 9.0: Mime Type determined: {mime_type}")
 
-        # 6. Database Insertion using the confirmed ENUM value
-        cur.execute(
-            """
-            INSERT INTO job_documents 
-                (document_id, application_id, document_type, original_filename, file_path, mime_type, upload_timestamp)
-            VALUES 
-                (%s, %s, %s, %s, %s, %s, NOW()) 
+        # 4. Database Insertion
+        # *** CRITICAL FIX: Use the standardized two-step connection pattern ***
+        conn = get_db_connection()
+        if conn is None:
+            # If the connection fails, raise an exception to jump to the cleanup/error block
+            raise Exception("Failed to establish database connection.")
+            
+        # Call the standardized function, passing the required 'conn' argument
+        cur = get_db_cursor(conn, cursor_factory=psycopg2.extras.DictCursor)
+        # *** END CRITICAL FIX ***
+
+        # SQL Query based STRICTLY on the provided schema:
+        sql_query = """
+            INSERT INTO job_documents (
+                document_id,            -- PK is explicitly inserted (UUID)
+                application_id, 
+                document_type, 
+                original_filename, 
+                file_path,              -- Matches schema (filename on disk = file_uuid)
+                mime_type, 
+                upload_timestamp        -- Matches schema
+            ) 
+            VALUES (%s, %s, %s, %s, %s, %s, NOW()) 
             RETURNING document_id
-            """,
-            (file_uuid, application_id_str, document_type, original_filename, file_uuid, mime_type) 
+            """
+        
+        # Parameters for the 6 placeholders (%s)
+        cur.execute(
+            sql_query,
+            (file_uuid, application_id_str, document_type_upper, original_filename, file_uuid, mime_type) 
         )
         new_document_id = cur.fetchone()[0]
         conn.commit()
@@ -1003,8 +1003,10 @@ def upload_document(application_id):
         # Clean up file if database insert fails
         if save_path and os.path.exists(save_path):
              os.remove(save_path)
-        print(f"PostgreSQL Error in upload_document: {e}")
-        return jsonify({"status": "error", "message": "Database error during document save (Check column names and types).", "detail": str(e)}), 500
+        # Extract specific DB error detail
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in upload_document: {e}") 
+        return jsonify({"status": "error", "message": f"Database error during document save: {db_error_detail}"}), 500
         
     except Exception as e:
         # Catch file system errors or other exceptions
@@ -1014,12 +1016,10 @@ def upload_document(application_id):
         if save_path and os.path.exists(save_path):
              os.remove(save_path)
         return jsonify({"status": "error", "message": "Processing error during file upload.", "detail": error_detail}), 500
-
+        
     finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+        if cur: cur.close()
+        if conn: conn.close()
 # ----------------------------------------------------------------------
 # 10. APPLICATION CREATION API: POST /api/application
 # ----------------------------------------------------------------------
@@ -1234,9 +1234,10 @@ def get_applications_by_company():
     finally:
         if conn:
             conn.close()
+
 # ----------------------------------------------------------------------
 # 12. DOCUMENT DOWNLOAD API: GET /api/documents/<string:file_path>
-# Fixes the 404 issue by providing the correct route definition.
+# FIX: Using standardized two-step database access to resolve 'Processing error'.
 # ----------------------------------------------------------------------
 
 @app.route('/api/documents/<string:file_path>', methods=['GET'])
@@ -1253,14 +1254,16 @@ def download_document(file_path):
     user_id = g.user_id 
     document_id = file_path # The file_path here is the secure document_id (UUID)
 
-    print(f"--- DEBUG 12.0 START ---")
-    print(f"User ID: {user_id}")
-    print(f"Document ID/File Path: {document_id}")
-
+    print(f"--- DEBUG 12.0 START: Document ID: {document_id} ---")
+    
     try:
-        conn, cur = get_db_cursor()
+        # 1. Database Connection (Standardized two-step process)
+        conn = get_db_connection()
         if conn is None:
              return jsonify({"status": "error", "message": "Database connection failed"}), 500
+             
+        # Call the standardized function, passing the required 'conn' argument
+        cur = get_db_cursor(conn, cursor_factory=psycopg2.extras.DictCursor)
 
         # 2. Security Check: Retrieve Document Metadata and Verify Ownership
         # We join job_documents with applications to ensure the document belongs to an application owned by the user.
@@ -1268,20 +1271,27 @@ def download_document(file_path):
             SELECT jd.original_filename
             FROM job_documents jd
             JOIN applications a ON jd.application_id = a.application_id
-            WHERE jd.document_id = %s AND a.user_id = %s;
-        """
+            WHERE jd.document_id = %s AND a.user_id = %s
+            """
+        
         cur.execute(sql_check, (document_id, user_id))
         document_data = cur.fetchone()
 
-        if document_data is None:
-            # File not found OR not owned by the current user (security enforced)
-            # Returning 404 instead of 403 prevents attackers from confirming file existence.
+        if not document_data:
+            # Document not found, or it is not owned by the authenticated user
+            print(f"DEBUG 12.0: Document {document_id} not found or ownership failed for user {user_id}.")
             return jsonify({"status": "error", "message": "File not found or unauthorized access."}), 404
         
         original_filename = document_data[0]
         print(f"DEBUG 12.0: Document ownership verified. Original filename: {original_filename}")
 
         # 3. Serve the file securely using Flask's send_from_directory
+        # Check if file exists on disk before serving (Crucial for FileNotFoundError handling)
+        full_path = os.path.join(app.config['UPLOAD_FOLDER'], document_id)
+        if not os.path.exists(full_path):
+             # Explicitly raise FileNotFoundError if the file is missing from disk
+             raise FileNotFoundError(f"File {document_id} is missing on disk.")
+
         return send_from_directory(
             app.config['UPLOAD_FOLDER'], 
             document_id, # This is the secure filename on disk
@@ -1302,39 +1312,44 @@ def download_document(file_path):
         
     except Exception as e:
         print(f"General Error in download_document: {e}")
+        # The generic error message now includes a print of the exception for server-side debugging
         return jsonify({"status": "error", "message": "Processing error during file download."}), 500
 
     finally:
         if cur: cur.close()
-        if conn: conn.close()
-        # ----------------------------------------------------------------------
+        if conn: conn.close()# ----------------------------------------------------------------------
 # 13. GET COMPANY CONTACTS API: GET /api/companies/<int:company_id>/contacts
-# FIX: Removed the non-existent t2.user_id filter to resolve schema error.
 # ----------------------------------------------------------------------
 @app.route('/api/companies/<int:company_id>/contacts', methods=['GET'])
 @authenticate_request()
 def get_company_contacts(company_id):
     """
     Endpoint 13: Retrieves all contacts mapped to the given standardized company_id.
-    NOTE: Security check (user_id filter) is temporarily removed from SQL due to 
-    schema mismatch (missing user_id on company_name_mapping table) as requested.
+    FIXED: Corrected database connection/cursor acquisition to prevent NoneType error.
     """
+    user_id = g.user_id
     conn = None
-    cur = None
-    try:
-        # We still retrieve g.user_id for future implementation, but it's not used in the query.
-        user_id = g.user_id 
+    
+    print(f"--- DEBUG 13.0 START: Retrieving contacts for Company ID: {company_id} ---")
 
+    try:
         if company_id <= 0:
             return jsonify({"status": "error", "message": "Invalid company ID format."}), 400
 
-        # Assumes get_db_cursor provides a connection (conn) and a DictCursor (cur)
-        conn, cur = get_db_cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # --- Connection Setup FIX: Use two-step process ---
+        conn = get_db_connection()
+        if conn is None:
+            # FIX: Return early if connection fails, preventing the AttributeError
+            return jsonify({"status": "error", "message": "Database connection failed."}), 500
+        
+        # Now conn is guaranteed not to be None, so we can safely get the cursor
+        cur = get_db_cursor(conn, cursor_factory=psycopg2.extras.DictCursor)
+        # -------------------------------------------------
+
 
         # CORRECTED SQL QUERY:
         # - Selects t1.id and aliases it to contact_id.
         # - Filters by company_id.
-        # - **REMOVED** the AND t2.user_id = %s filter.
         sql_query = """
         SELECT
             t1.id AS contact_id,
@@ -1356,7 +1371,9 @@ def get_company_contacts(company_id):
         # Convert DictRow objects to standard dictionaries for JSON serialization
         contacts = [dict(row) for row in cur.fetchall()]
 
-        # The API Wishlist (New Universal Rule for Array Returns) requires this structure
+        print(f"DEBUG 13.0: Retrieved {len(contacts)} contacts for company {company_id}.")
+
+        # Success Response
         return jsonify({
             "status": "success",
             "company_id": company_id,
@@ -1364,18 +1381,24 @@ def get_company_contacts(company_id):
         }), 200
 
     except psycopg2.Error as e:
+        if conn: conn.rollback()
         db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
-        print(f"PostgreSQL Error in get_company_contacts: {db_error_detail}")
+        print(f"\n[CRITICAL DB ERROR IN GET /api/companies/contacts (Endpoint 13.0)]:") 
+        print(f"DETAIL: {db_error_detail}\n") 
         return jsonify({"status": "error", "message": f"Database error retrieving contacts: {db_error_detail}"}), 500
         
     except Exception as e:
+        if conn: conn.rollback()
+        import traceback
+        traceback.print_exc()
         print(f"General Error in get_company_contacts: {e}")
-        return jsonify({"status": "error", "message": "Processing error retrieving contacts."}), 500
+        return jsonify({"status": "error", "message": "An unexpected server error occurred."}), 500
 
     finally:
         if conn:
             conn.close()
-            # ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
 # 14. SIDEBAR SUMMARY API: GET /api/sidebar
 # FIX: Removed WHERE clause as 'companies' is a global table.
 # ----------------------------------------------------------------------
@@ -1788,10 +1811,11 @@ def soft_delete_company_profile(company_id):
         if conn:
             conn.autocommit = True
             conn.close()
+# --- Helper Functions ---
+
 def get_or_create_job_title(cur, title_name: str) -> int:
     """
-    FIXED LOGIC: Looks up or creates a job title globally by name, 
-    EXCLUDING company_id as requested.
+    Looks up or creates a job title globally by name.
     
     Args:
         cur: The psycopg2 database cursor.
@@ -1800,8 +1824,8 @@ def get_or_create_job_title(cur, title_name: str) -> int:
     Returns:
         The job_title_id (integer) of the existing or newly created job title.
     """
-    # 1. Look up the job title based ONLY on the title_name (Global lookup)
-    sql_check = sql.SQL("SELECT job_title_id FROM job_titles WHERE title_name = %s")
+    # 1. Look up the job title based ONLY on the title_name (Global lookup, case insensitive)
+    sql_check = "SELECT job_title_id FROM job_titles WHERE lower(title_name) = lower(%s)"
     cur.execute(sql_check, (title_name,))
     
     result = cur.fetchone()
@@ -1812,11 +1836,11 @@ def get_or_create_job_title(cur, title_name: str) -> int:
     now = datetime.now()
     
     # Standardized_title is set to title_name as a default placeholder
-    sql_insert = sql.SQL("""
+    sql_insert = """
         INSERT INTO job_titles (title_name, standardized_title, created_at, updated_at)
         VALUES (%s, %s, %s, %s)
         RETURNING job_title_id
-    """)
+    """
     
     # NOTE: No company_id is passed or used here.
     cur.execute(sql_insert, (title_name, title_name, now, now))
@@ -1824,114 +1848,118 @@ def get_or_create_job_title(cur, title_name: str) -> int:
     new_job_title_id = cur.fetchone()[0]
     return new_job_title_id
 
+def check_company_exists(cur, company_id):
+    """Checks if a company_id exists."""
+    sql_check = "SELECT company_id FROM companies WHERE company_id = %s;"
+    cur.execute(sql_check, (company_id,))
+    return cur.fetchone() is not None
+
+
 # ----------------------------------------------------------------------
 # 19. APPLICATION UPDATE API: PUT /api/applications/<uuid:application_id>
 # ----------------------------------------------------------------------
 @app.route('/api/applications/<uuid:application_id>', methods=['PUT'])
-@mock_auth_required
+@authenticate_request()
 def update_application_19(application_id):
     """
     Endpoint 19.0: Updates an existing job application.
+    FIXED: Corrected database connection/cursor acquisition to prevent NoneType error.
     """
-    conn = None
-    cur = None
-    application_id_str = str(application_id)
     user_id = g.user_id
-    
-    print(f"--- DEBUG 19.0 START UPDATE for {application_id_str} by User {user_id} ---")
+    conn = None
+    application_id_str = str(application_id)
+
+    print(f"--- DEBUG 19.0 START: Updating Application ID: {application_id_str} for User: {user_id} ---")
 
     try:
+        # 1. Get JSON data
         data = request.get_json(silent=False)
         if not data:
-            raise BadRequest("Request body must be valid JSON.")
+            raise BadRequest("Request body must be valid JSON and cannot be empty.")
 
-        conn, cur = get_db_cursor()
+        # --- Connection Setup FIX: Check for failed connection immediately ---
+        conn = get_db_connection()
         if conn is None:
-             return jsonify({"status": "error", "message": "Database connection failed"}), 500
-
-        # --- 1. Ownership and Existence Check ---
-        # Ensure the application exists AND belongs to the authenticated user.
-        sql_check_owner = sql.SQL("SELECT job_title_id FROM applications WHERE application_id = %s AND user_id = %s")
-        cur.execute(sql_check_owner, (application_id_str, user_id))
+            # FIX: Return early if connection fails, preventing the AttributeError
+            return jsonify({"status": "error", "message": "Database connection failed."}), 500
         
-        if not cur.fetchone():
-            conn.close()
-            return jsonify({"status": "error", "message": f"Application {application_id_str} not found or unauthorized for user {user_id}."}), 404
+        # Now conn is guaranteed not to be None, so we can safely get the cursor
+        cur = get_db_cursor(conn, cursor_factory=psycopg2.extras.DictCursor)
+        # ----------------------------
 
-        # --- 2. Process Input Fields ---
-        
-        # Fields that map directly to columns
-        title_name = data.get('title_name')
-        date_applied_str = data.get('date_applied')
+        # 2. Data Validation and Pre-processing
         current_status = data.get('current_status')
-        
-        job_title_id = None
-        
-        # If the title is being updated, handle the job_titles lookup
-        if title_name:
-            print(f"DEBUG 19.0: Processing new/updated job title: {title_name}")
-            # CALLS THE CORRECTED GLOBAL HELPER FUNCTION
-            job_title_id = get_or_create_job_title(cur, title_name)
-        
-        # Date Validation
-        date_applied_sql = None
-        if date_applied_str:
-            try:
-                # Assuming YYYY-MM-DD format
-                date_applied_sql = datetime.strptime(date_applied_str, '%Y-%m-%d').date().isoformat()
-            except ValueError:
-                return jsonify({"status": "error", "message": "Invalid date format for 'date_applied'. Expected YYYY-MM-DD."}), 400
-            
-        # --- 3. Construct and Execute Dynamic Update Query ---
-        
-        updates = []
-        params = []
-        
-        # Conditionally add fields to update
-        if job_title_id is not None:
-            updates.append(sql.SQL("job_title_id = %s"))
-            params.append(job_title_id)
-            
-        if date_applied_sql is not None:
-            updates.append(sql.SQL("date_applied = %s"))
-            params.append(date_applied_sql)
-            
-        if current_status is not None:
-            # IMPORTANT: Ensure 'current_status' value is a valid ENUM value in your database!
-            updates.append(sql.SQL("current_status = %s"))
-            params.append(current_status)
-            
-        # If no fields were provided in the body, nothing to update
-        if not updates:
-            conn.close()
-            return jsonify({"status": "success", "message": "No updatable fields provided in request body."}), 200
+        date_applied_str = data.get('date_applied')
+        title_name = data.get('title_name')
+        company_id = data.get('company_id')
+        company_name_clean = data.get('company_name_clean') 
 
-        # Add mandatory updated_at timestamp
-        updates.append(sql.SQL("updated_at = NOW()"))
+        if not all([current_status, date_applied_str, title_name, company_id]):
+            return jsonify({"status": "error", "message": "Missing required fields: current_status, date_applied, title_name, company_id."}), 400
+
+        # Date validation
+        try:
+            # Attempt to parse date in YYYY-MM-DD format
+            date_applied_sql = datetime.strptime(date_applied_str, '%Y-%m-%d').date().isoformat()
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid date format for 'date_applied'. Expected YYYY-MM-DD."}), 400
+
+        # Company ID validation
+        try:
+            company_id_int = int(company_id)
+        except ValueError:
+            return jsonify({"status": "error", "message": "'company_id' must be an integer string."}), 400
+
+        # Check if the company_id exists
+        if not check_company_exists(cur, company_id_int):
+             return jsonify({"status": "error", "message": f"Company ID {company_id_int} does not exist in the database."}), 404
         
-        # Construct the final SQL command
-        sql_update = sql.SQL("""
+        # 3. Get or Create Job Title
+        job_title_id = get_or_create_job_title(cur, title_name)
+
+        # 4. Update the Application Record (Requires ownership check)
+        sql_update = """
             UPDATE applications
-            SET {}
+            SET
+                company_id = %s,
+                job_title_id = %s,
+                date_applied = %s,
+                current_status = %s,
+                updated_at = NOW()
             WHERE application_id = %s AND user_id = %s
-        """).format(sql.SQL(', ').join(updates))
+            RETURNING application_id;
+        """
         
-        params.append(application_id_str)
-        params.append(user_id)
+        cur.execute(sql_update, (
+            company_id_int,
+            job_title_id,
+            date_applied_sql,
+            current_status,
+            application_id_str,
+            user_id
+        ))
         
-        cur.execute(sql_update, params)
+        # 5. Commit and Check Result
         conn.commit()
 
         # Check if any row was actually updated
         if cur.rowcount == 0:
-             # This is defensive, as the ownership check should have prevented it.
-             return jsonify({"status": "error", "message": "Update committed, but no rows were modified."}), 500
+             # Application not found or does not belong to the user
+             return jsonify({"status": "error", "message": f"Application ID {application_id_str} not found or does not belong to the user."}), 404
 
 
+        print(f"DEBUG 19.0: Application {application_id_str} updated successfully.")
+        
+        # 6. Success Response
         return jsonify({
             "status": "success",
             "message": f"Application {application_id_str} updated successfully."
-        }), 200
+        }), 200 # Using 200 OK for a successful resource update
+
+    except BadRequest as e:
+        if conn: conn.rollback()
+        print(f"[CLIENT ERROR] Bad Request: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 400
 
     except psycopg2.Error as e:
         if conn: conn.rollback()
@@ -1948,18 +1976,16 @@ def update_application_19(application_id):
             "detail": db_error_detail
         }), 500
         
-    except BadRequest as e:
-        print(f"[CLIENT ERROR] Bad Request: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 400
-        
     except Exception as e:
         if conn: conn.rollback()
         traceback.print_exc()
+        print(f"[GENERAL ERROR] in update_application_19: {e}")
         return jsonify({"status": "error", "message": "An unexpected server error occurred."}), 500
-        
+
     finally:
-        if conn: conn.close()
-        
+        if conn:
+            conn.close()
+
 
 # ----------------------------------------------------------------------
 # 20. DELETE /api/applications/{application_id} (Delete Application)
@@ -2176,7 +2202,128 @@ def get_single_application(application_id):
         if cur: cur.close()
         # CRITICAL: Always close the connection
         if conn: conn.close()
-        ## MAIN (Included for optional local development testing)
+        # CRITICAL FIX: The function definition now explicitly requires cursor_factory, 
+# preventing the 'got multiple values' TypeError.
+def get_db_cursor(conn, cursor_factory): 
+    """Returns a cursor object with the specified factory."""
+    return conn.cursor(cursor_factory=cursor_factory)
+
+
+# ----------------------------------------------------------------------
+# 22. APPLICATION AGGREGATE API: GET /api/applications/all (FIXED)
+# ----------------------------------------------------------------------
+@app.route('/api/applications/all', methods=['GET'])
+@authenticate_request()
+def get_all_user_applications():
+    """
+    Endpoint 22.0: Retrieves a complete, aggregated list of all job applications
+    for the authenticated user, including nested document information.
+    """
+    user_id = g.user_id
+    conn = None
+
+    print(f"--- DEBUG 22.0 START: Retrieving all applications for User ID: {user_id} ---")
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"status": "error", "message": "Database connection failed."}), 500
+
+        # Use the explicit keyword argument
+        cur = get_db_cursor(conn, cursor_factory=psycopg2.extras.DictCursor)
+
+        # FIX: Removed 'a.job_posting_url' from the SELECT list as it is not in the schema.
+        sql_query = """
+            SELECT
+                a.application_id,
+                a.date_applied,
+                a.current_status,
+                jt.job_title_id,
+                jt.title_name,
+                c.company_name_clean,
+                c.company_id,
+                jd.document_id,          
+                jd.document_type,        
+                jd.file_path,            
+                jd.original_filename     
+            FROM applications a
+            LEFT JOIN job_titles jt ON a.job_title_id = jt.job_title_id
+            LEFT JOIN companies c ON a.company_id = c.company_id
+            LEFT JOIN job_documents jd ON a.application_id = jd.application_id
+            WHERE a.user_id = %s;
+        """
+
+        cur.execute(sql_query, (user_id,))
+        records = cur.fetchall()
+
+        # --- Aggregation Logic (Required to handle the one-to-many join) ---
+        applications_map = {} # Key: application_id (UUID string)
+
+        for record in records:
+            app_id = str(record['application_id'])
+            
+            # 1. Initialize application structure if it's the first time seeing this app_id
+            if app_id not in applications_map:
+                company_id = record['company_id']
+                
+                applications_map[app_id] = {
+                    "application_id": app_id,
+                    "date_applied": record['date_applied'].isoformat() if isinstance(record['date_applied'], date) else str(record['date_applied']),
+                    "current_status": record['current_status'],
+                    # FIX: 'job_posting_url' removed here to match SQL and schema
+                    "company_info": {
+                        "company_id": company_id,
+                        "company_name_clean": record['company_name_clean'] or 'Unknown/Unstandardized Company' 
+                    },
+                    "job_title_info": {
+                        "job_title_id": record['job_title_id'],
+                        "title_name": record['title_name']
+                    },
+                    "documents": [] # Initialize documents list
+                }
+
+            # 2. Add document if it exists and is unique (check for NULL document_id due to LEFT JOIN)
+            document_id = record['document_id']
+            if document_id is not None:
+                doc_id_str = str(document_id)
+                
+                # Check if this document ID has already been added to this application
+                is_duplicate = any(d['document_id'] == doc_id_str for d in applications_map[app_id]['documents'])
+
+                if not is_duplicate:
+                    applications_map[app_id]['documents'].append({
+                        "document_id": doc_id_str,
+                        "document_type": record['document_type'],
+                        "file_path": record['file_path'], # Secure filename
+                        "original_filename": record['original_filename']
+                    })
+
+        # Convert the dictionary values (applications) back into a final response list
+        applications_list = list(applications_map.values())
+
+        print(f"DEBUG 22.0: Successfully retrieved {len(applications_list)} applications with documents.")
+
+        return jsonify({
+            "status": "success",
+            "applications": applications_list
+        }), 200
+
+    except psycopg2.Error as e:
+        # This block now captures the specific schema/SQL error
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"[DB ERROR] PostgreSQL Error in get_all_user_applications: {db_error_detail}")
+        return jsonify({"status": "error", "message": "Database error retrieving applications."}), 500
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[GENERAL ERROR] in get_all_user_applications: {e}")
+        return jsonify({"status": "error", "message": "An unexpected server error occurred."}), 500
+
+    finally:
+        if conn:
+            conn.close()
+## MAIN (Included for optional local development testing)
 if __name__ == '__main__':
     # This is for local development only. Gunicorn is typically used in production.
     app.run(debug=True, port=5000)

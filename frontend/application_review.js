@@ -53,7 +53,95 @@ let uploadStatusMessage = null;
 let currentCompanyId = null;
 
 
-// ---------------------------------------------------------------------
+// Upload File code from application_create.js will be adapted here
+/**
+ * Uploads a single file and its type to the API endpoint (Core Logic).
+ * This is adapted from application_create.js's uploadSingleDocument.
+ * @param {string} appId - The ID of the application.
+ * @param {File} file - The file object to upload.
+ * @param {string} type - The document type string (e.g., 'RESUME').
+ */
+async function uploadModalFile(appId, file, type) {
+    // API 9.0: POST /api/application/<id>/documents
+    const apiUrl = `${DOCUMENT_UPLOAD_API_BASE}/${appId}/documents`;
+    const fileName = file.name;
+    const operationName = `uploading file ${fileName} for application ${appId.substring(0, 8)}`;
+    
+    // Authorization header logic from handleDocumentUpload
+    const authHeader = `Bearer ${window.__initial_auth_token || currentUserId || appId || 'dummy-token'}`;
+
+    try {
+        const formData = new FormData();
+        // NOTE: Using 'file' and 'document_type' keys as successfully used in the modal context
+        formData.append('file', file);
+        formData.append('document_type', type); 
+
+        console.log(`[MODAL UPLOAD] Starting upload for ${fileName} using file key 'file' and type key 'document_type'...`);
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            body: formData, 
+            headers: {
+                'Authorization': authHeader
+            }
+        });
+
+        if (!response.ok) {
+            // Implement the robust error collection logic from application_create.js
+            const errorData = await response.json().catch(() => ({ message: response.statusText, detail: 'Response body was not valid JSON or was empty.' }));
+            console.error(`[MODAL UPLOAD] Detailed Server Error for ${fileName}:`, errorData);
+
+            const serverMessage = errorData?.message || errorData?.detail || response.statusText;
+            throw new Error(`API Error (${response.status}): ${operationName} failed. Server says: ${serverMessage}`);
+        }
+        
+        console.log(`[MODAL UPLOAD] Success: File ${fileName} uploaded successfully. Status: ${response.status}`);
+        return true; 
+
+    } catch (error) {
+        console.error(`[MODAL UPLOAD] ${operationName} failed:`, error);
+        throw error; // Re-throw to be caught by the outer function
+    }
+}
+async function uploadSingleDocument(appId, file, type, index) {
+    const apiUrl = API.UPLOAD_DOCUMENT(appId);
+    const fileName = file.name;
+    const operationName = `uploading file ${index + 1}/${fileName}`;
+
+    try {
+        const formData = new FormData();
+        
+        // Final working keys from prior debugging
+        formData.append('file', file);
+        formData.append('document_type', type); 
+
+        console.log(`[FILE UPLOAD] Starting upload for file ${index + 1} (${fileName}) using file key 'document' and type key 'document_type'...`);
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer MOCK_TOKEN' 
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: response.statusText }));
+            const errorMessage = errorData?.message || `API Error (${response.status}): ${operationName} failed.`;
+            throw new Error(errorMessage);
+        }
+        
+        console.log(`[FILE UPLOAD] Success: File ${index + 1} (${fileName}) uploaded successfully. Status: ${response.status}`);
+        return true; // Success
+
+    } catch (error) {
+        console.error(`[FILE UPLOAD] ${operationName} failed:`, error);
+        return false; // Failure
+    }
+}
+
+//--
+// --//----------------------------------------------------------------------
 // --- MAIN APPLICATION REVIEW LOGIC -----------------------------------
 // ---------------------------------------------------------------------
 
@@ -349,8 +437,9 @@ function closeUploadModal() {
 }
 
 
+
 /**
- * Handles the form submission for document upload.
+ * Handles the form submission for document upload. - now with code from application_create.js
  */
 async function handleDocumentUpload(event) {
     event.preventDefault(); 
@@ -371,28 +460,9 @@ async function handleDocumentUpload(event) {
     document.getElementById('uploadSubmitBtn').disabled = true;
 
     try {
-        const formData = new FormData();
-        formData.append('document', file);
-        formData.append('document_type_code', documentType); 
-
-        // API 9.0: POST /api/application/<id>/documents
-        const apiUrl = `${DOCUMENT_UPLOAD_API_BASE}/${applicationId}/documents`;
-        
-        // Use standard fetch for FormData upload (CRITICAL: DO NOT use fetchWithGuard or set Content-Type)
-        const authHeader = `Bearer ${window.__initial_auth_token || currentUserId || appId || 'dummy-token'}`;
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            body: formData, 
-            headers: {
-                'Authorization': authHeader
-            }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-             throw new Error(data.message || `API Error (${response.status}): Document upload failed.`);
-        }
+        // --- CORE LOGIC REPLACED: Call the new, consolidated function ---
+        await uploadModalFile(applicationId, file, documentType);
+        // --- END CORE LOGIC REPLACEMENT ---
 
         uploadStatusMessage.textContent = `Upload successful! Document uploaded.`;
         uploadStatusMessage.classList.remove('text-indigo-600', 'text-error');
@@ -407,9 +477,9 @@ async function handleDocumentUpload(event) {
             }
         }, 1500);
 
-
     } catch (error) {
         console.error("Document upload failed:", error);
+        // The error will contain the detailed server message from uploadModalFile
         uploadStatusMessage.textContent = `Upload failed: ${error.message}`;
         uploadStatusMessage.classList.remove('text-indigo-600', 'text-success');
         uploadStatusMessage.classList.add('text-error', 'p-2', 'bg-red-50', 'font-bold');
@@ -417,7 +487,6 @@ async function handleDocumentUpload(event) {
         document.getElementById('uploadSubmitBtn').disabled = false;
     }
 }
-
 
 /**
  * Handles the click on the "Record New Application" button.
