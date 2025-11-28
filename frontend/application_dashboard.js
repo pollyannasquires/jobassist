@@ -1,289 +1,276 @@
-// FILENAME: application_dashboard.js | Handles the main dashboard view, listing all applications.
+// FILENAME: application_dashboard.js | Logic for fetching and displaying the user's application history.
 
-import { fetchWithGuard, initializeServices } from './core-utils.js';
-import { getAuth } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { initializeServices, fetchWithGuard } from './core-utils.js';
 
 // --- API Endpoints ---
-// API 11.0: GET /api/applications/all (Retrieve All Applications for authenticated user)
-const APPLICATIONS_API_ALL = '/api/applications/all'; 
+const APPLICATIONS_ALL_API = '/api/applications/all'; // Endpoint 22.0
+
+// --- Global State ---
+let allApplications = [];
+let currentSortKey = 'application_date';
+let currentSortDirection = 'desc'; // Default to newest first
 
 // --- DOM Elements ---
-let applicationTableBody = null; // Renamed from applicationListContainer
-let loadingIndicator = null;
-let errorDisplay = null;
-
-// --- State for Sorting and Data ---
-let allApplications = [];
-let sortState = {
-    key: 'application_date', // Default sort key
-    direction: 'desc'        // Default sort direction (newest first)
-};
+const applicationTableBody = document.getElementById('applicationTableBody');
+const loadingIndicator = document.getElementById('loadingIndicator');
+const errorDisplay = document.getElementById('errorDisplay');
+const totalApplicationCountElement = document.getElementById('totalApplicationCount');
 
 
 // ---------------------------------------------------------------------
-// --- SORTING & RENDERING ---------------------------------------------
+// --- UI RENDERING FUNCTIONS ------------------------------------------
 // ---------------------------------------------------------------------
 
 /**
- * Sorts the global application array based on the current sort state.
+ * Shows the error message and hides the loading spinner/table.
+ * @param {string} message - The error message to display.
  */
-function sortApplications() {
-    const { key, direction } = sortState;
-
-    allApplications.sort((a, b) => {
-        let valA = a[key];
-        let valB = b[key];
-
-        // Handle date sorting (for 'application_date' and 'updated_at')
-        if (key.includes('date')) {
-            valA = new Date(valA || 0); // Use epoch start if date is missing
-            valB = new Date(valB || 0);
-        }
-        
-        // Handle case-insensitive string sorting
-        if (typeof valA === 'string' && typeof valB === 'string') {
-            valA = valA.toLowerCase();
-            valB = valB.toLowerCase();
-        }
-
-        let comparison = 0;
-        if (valA > valB) {
-            comparison = 1;
-        } else if (valA < valB) {
-            comparison = -1;
-        }
-
-        // Apply direction: 1 for asc, -1 for desc
-        return direction === 'desc' ? (comparison * -1) : comparison;
-    });
-}
-
-/**
- * Updates the visual icons and classes on the table headers to reflect the current sort state.
- */
-function updateSortIcons() {
-    document.querySelectorAll('.sortable-header').forEach(header => {
-        const key = header.getAttribute('data-sort-key');
-        const icon = document.getElementById(`sort-icon-${key}`);
-        
-        // Reset classes
-        header.classList.remove('sort-active');
-        if (icon) {
-            icon.classList.remove('rotate-180');
-        }
-
-        if (key === sortState.key) {
-            header.classList.add('sort-active');
-            // Rotate arrow-down-up icon for 'asc'
-            if (sortState.direction === 'asc' && icon) {
-                icon.classList.add('rotate-180');
-            }
-        }
-    });
-}
-
-/**
- * Public function exposed to window for handling click events on table headers.
- * @param {string} clickedKey - The data-sort-key of the clicked column.
- */
-window.handleSortClick = function(clickedKey) {
-    if (sortState.key === clickedKey) {
-        // Toggle direction
-        sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
-    } else {
-        // New column clicked, set new key and default to descending
-        sortState.key = clickedKey;
-        sortState.direction = 'desc';
+function displayError(message) {
+    if (loadingIndicator) loadingIndicator.classList.add('hidden');
+    if (applicationTableBody) applicationTableBody.innerHTML = '';
+    if (errorDisplay) {
+        errorDisplay.textContent = `Data Load Error: ${message}`;
+        errorDisplay.classList.remove('hidden');
     }
+}
 
-    // Sort, update icons, and re-render
-    sortApplications();
-    updateSortIcons();
-    renderApplications(allApplications);
+/**
+ * Formats the application status into a visually distinct badge.
+ * @param {string} status - The status code (e.g., 'NEW', 'INTERVIEW', 'OFFER').
+ * @returns {string} HTML for the status badge.
+ */
+function formatStatusBadge(status) {
+    let colorClass;
+    switch (status) {
+        case 'OFFER':
+            colorClass = 'bg-green-100 text-green-800';
+            break;
+        case 'INTERVIEW':
+            colorClass = 'bg-yellow-100 text-yellow-800';
+            break;
+        case 'REJECTED':
+            colorClass = 'bg-red-100 text-red-800';
+            break;
+        case 'NEW':
+        default:
+            colorClass = 'bg-indigo-100 text-indigo-800';
+            break;
+    }
+    return `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${colorClass}">
+                ${status.toUpperCase().replace('_', ' ')}
+            </span>`;
 }
 
 
 /**
- * Transforms the raw application data from the API into a standardized format
- * for rendering in the dashboard.
- * @param {object} rawApp - The raw application object from API 11.0.
- * @returns {object} A clean application object ready for rendering.
+ * Renders the application data into the HTML table body.
+ * @param {Array<Object>} applications - The sorted list of application objects.
+ * * **UPDATED:** Wrapped company name and contact count in anchor tags
+ * to redirect to the management.html page.
  */
-function normalizeApplicationData(rawApp) {
-    // CRITICAL FIX: Mapping nested API fields to flat, readable properties for the UI
-    return {
-        application_id: rawApp.application_id,
-        // The API uses date_applied
-        application_date: rawApp.date_applied,
-        // The API nests company info
-        company_id: rawApp.company_info?.company_id,
-        company_name_clean: rawApp.company_info?.company_name_clean,
-        // The API nests job title info
-        job_title: rawApp.job_title_info?.title_name,
-        // The API uses current_status
-        status_code: rawApp.current_status,
-        // updated_at is currently missing in the example but kept for future proofing
-        updated_at: rawApp.updated_at || rawApp.date_applied, 
-        // job_url is included in the normalization but intentionally not used in rendering now
-        job_url: rawApp.job_url || null, 
-    };
-}
-
-
-/**
- * Renders the application list in the main container as a table.
- * @param {Array<object>} applications - The array of application data (must be normalized).
- */
-function renderApplications(applications) {
+function renderApplicationTable(applications) {
     if (!applicationTableBody) return;
-    
-    // Clear previous content
-    applicationTableBody.innerHTML = ''; 
 
-    if (!applications || applications.length === 0) {
+    if (applications.length === 0) {
         applicationTableBody.innerHTML = `
             <tr>
-                <td colspan="5" class="text-center py-12 text-gray-500">
-                    <i data-lucide="inbox" class="w-8 h-8 mx-auto text-gray-400 mb-2"></i>
-                    <p>No Applications Found.</p>
+                <td colspan="6" class="text-center py-10 text-gray-500 font-medium">
+                    No applications found. Start tracking your job search!
                 </td>
             </tr>
         `;
-        // Re-create icons for new HTML
-        if (typeof lucide !== 'undefined') lucide.createIcons();
         return;
     }
-    
-    // Generate table rows
-    const listHtml = applications.map(app => {
-        const companyId = app.company_id;
-        const appId = app.application_id;
-        
-        // CRITICAL: Ensure company ID and name are available for the review link
-        if (!companyId || !app.company_name_clean) {
-             console.warn(`Skipping application ${appId} due to missing company context.`);
-             return ''; // Skip rendering if essential data is missing
-        }
 
-        // Link leads to the application review page for this company
-        const reviewUrl = `application_review.html?companyId=${companyId}&companyName=${encodeURIComponent(app.company_name_clean)}`;
+    applicationTableBody.innerHTML = applications.map(app => {
+        // Construct the URL to the application review page (for 'Actions' column)
+        const reviewUrl = `application_review.html?companyId=${app.company_id}&companyName=${encodeURIComponent(app.company_name_clean)}`;
+        
+        // Construct the URL for management page (for 'Company' and 'Contacts' columns)
+        // Uses the format: http://192.168.56.4/management.html?companyId=333&companyName=Code%20Fusion%20Labs
+        const managementUrl = `management.html?companyId=${app.company_id}&companyName=${encodeURIComponent(app.company_name_clean)}`;
 
-        // Determine status styling
-        let statusText = app.status_code || 'NEW'; // Default to NEW based on provided options
-        let statusClasses = 'inline-flex items-center px-3 py-0.5 rounded-full text-xs font-medium';
-        
-        // Use uppercase status code for reliable matching
-        const normalizedStatus = statusText.toUpperCase();
-
-        // Updated switch statement to handle all provided options explicitly
-        switch (normalizedStatus) {
-            case 'INTERVIEW':
-                statusClasses += ' bg-yellow-100 text-yellow-800';
-                break;
-            case 'OFFER':
-                statusClasses += ' bg-green-100 text-green-800';
-                break;
-            case 'REJECTED':
-                statusClasses += ' bg-red-100 text-red-800';
-                break;
-            case 'CONTACTED':
-                statusClasses += ' bg-blue-100 text-blue-800'; // Blue for intermediate positive step
-                break;
-            case 'NEW':
-            case 'APPLIED': // Treat APPLIED (potential old status) as NEW (initial status)
-            case 'CLOSED': // CLOSES can be generic, using default style
-            default:
-                statusClasses += ' bg-indigo-100 text-indigo-800'; // Indigo for initial/default states
-                // Ensure display text is consistent. Use the normalized status code if it's one of the options, otherwise default to 'NEW'.
-                if (['NEW', 'CONTACTED', 'INTERVIEW', 'OFFER', 'REJECTED'].includes(normalizedStatus)) {
-                    statusText = normalizedStatus;
-                } else if (normalizedStatus === 'APPLIED') {
-                    statusText = 'NEW';
-                } else {
-                    statusText = 'NEW';
-                }
-                break;
-        }
-        
-        // Fallback to title-cased display
-        statusText = statusText.charAt(0).toUpperCase() + statusText.slice(1).toLowerCase();
-        
-        // Format dates
-        const appDate = new Date(app.application_date).toLocaleDateString();
-        
-        // Job URL link is intentionally removed from this view.
-        
         return `
-            <tr class="hover:bg-gray-50 transition duration-100">
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm font-medium text-gray-900">${appDate}</div>
-                    <div class="text-xs text-gray-500 truncate">ID: ${appId}</div>
+            <tr class="hover:bg-gray-50 transition duration-150">
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ${app.date_applied ? new Date(app.date_applied).toLocaleDateString() : 'N/A'}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 cursor-pointer">
+                    <!-- CHANGE: Company Name now links to management page -->
+                    <a href="${managementUrl}" class="hover:text-primary transition">
+                        ${app.company_name_clean || 'N/A'}
+                    </a>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-500">
+                    ${app.title_name || app.job_title_id || 'N/A'}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-900 font-semibold">${app.company_name_clean}</div>
+                    ${formatStatusBadge(app.current_status)}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-900">${app.job_title}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="${statusClasses}">
-                        ${statusText}
-                    </span>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-bold cursor-pointer">
+                    <!-- CHANGE: Contact Count now links to management page -->
+                    <a href="${managementUrl}" class="hover:text-primary transition">
+                        ${app.contact_count !== undefined ? app.contact_count : 0}
+                    </a>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <a href="${reviewUrl}" class="text-primary hover:text-indigo-900 transition flex items-center">
-                        Review <i data-lucide="arrow-right" class="w-4 h-4 ml-1"></i>
+                    <a href="${reviewUrl}" class="text-primary hover:text-indigo-800 transition">
+                        <i data-lucide="eye" class="w-5 h-5 inline-block align-text-bottom"></i> Review
                     </a>
                 </td>
             </tr>
         `;
     }).join('');
 
-    applicationTableBody.innerHTML = listHtml;
+    // Re-initialize lucide icons for the dynamically injected table rows
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+}
 
-    // Re-create icons for new HTML
-    if (typeof lucide !== 'undefined') lucide.createIcons();
+
+// ---------------------------------------------------------------------
+// --- DATA AND SORTING LOGIC ------------------------------------------
+// ---------------------------------------------------------------------
+
+/**
+ * Client-side sorting function.
+ * @param {string} key - The data property key to sort by.
+ * * **UPDATED:** Added numeric sorting logic for the 'contact_count' key.
+ */
+function sortApplications(key) {
+    // 1. Determine sort direction
+    if (currentSortKey === key) {
+        // Toggle direction if the same key is clicked
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        // Default to descending for a new key (e.g., newest date, Z-A)
+        currentSortDirection = 'desc';
+        // Reset previous header/icon styles
+        document.querySelectorAll('.sortable-header').forEach(header => {
+            header.classList.remove('sort-active');
+        });
+        document.querySelectorAll('.sort-icon').forEach(icon => {
+             icon.classList.remove('rotate-180');
+        });
+    }
+    
+    currentSortKey = key;
+
+    // 2. Perform the sort
+    allApplications.sort((a, b) => {
+        const aVal = a[key] || '';
+        const bVal = b[key] || '';
+
+        // **CHANGE START**
+        // Handle numeric comparison specifically for contact_count
+        if (key === 'contact_count') {
+            // Ensure values are treated as numbers (defaulting null/undefined to 0 for sort stability)
+            const numA = parseInt(aVal) || 0;
+            const numB = parseInt(bVal) || 0;
+            return (currentSortDirection === 'asc') ? numA - numB : numB - numA;
+        }
+        // **CHANGE END**
+
+        // Handle string comparison for other fields (case-insensitive)
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
+            const comparison = aVal.localeCompare(bVal, undefined, { sensitivity: 'base' });
+            return (currentSortDirection === 'asc') ? comparison : -comparison;
+        }
+        
+        // Default comparison (e.g., dates)
+        if (aVal < bVal) return (currentSortDirection === 'asc') ? -1 : 1;
+        if (aVal > bVal) return (currentSortDirection === 'asc') ? 1 : -1;
+        return 0;
+    });
+
+    // 3. Update UI
+    updateSortIcons();
+    renderApplicationTable(allApplications);
 }
 
 
 /**
- * Fetches all applications for the current authenticated user (API 11.0).
+ * Updates the visual state of the sort icons and header color.
+ */
+function updateSortIcons() {
+    // Reset all icons and headers
+    document.querySelectorAll('.sortable-header').forEach(header => {
+        header.classList.remove('sort-active');
+    });
+    document.querySelectorAll('.sort-icon').forEach(icon => {
+        icon.classList.remove('rotate-180', 'sort-active');
+    });
+
+    // Highlight the active header
+    const activeHeader = document.getElementById(`header-${currentSortKey}`);
+    if (activeHeader) {
+        activeHeader.classList.add('sort-active');
+        
+        // Rotate the icon based on direction
+        const activeIcon = document.getElementById(`sort-icon-${currentSortKey}`);
+        if (activeIcon) {
+            activeIcon.classList.add('sort-active');
+            if (currentSortDirection === 'desc') {
+                activeIcon.classList.add('rotate-180');
+            } else {
+                activeIcon.classList.remove('rotate-180');
+            }
+        }
+    }
+}
+
+/**
+ * Handles the click event on a sortable table header.
+ * Exposed globally via window.handleSortClick.
+ * @param {string} key - The data property key to sort by.
+ * * **UPDATED:** Now correctly handles clicks for the 'contact_count' column.
+ */
+function handleSortClick(key) {
+    if (allApplications.length > 0) {
+        sortApplications(key);
+    }
+}
+
+
+// ---------------------------------------------------------------------
+// --- DATA FETCHING ---------------------------------------------------
+// ---------------------------------------------------------------------
+
+/**
+ * Fetches all job applications for the current user.
  */
 async function fetchApplications() {
-    // Renamed from applicationListContainer to applicationTableBody
-    if (!applicationTableBody || !loadingIndicator || !errorDisplay) return;
-
-    loadingIndicator.classList.remove('hidden');
-    errorDisplay.classList.add('hidden');
-    applicationTableBody.innerHTML = ''; // Clear existing list
+    if (loadingIndicator) loadingIndicator.classList.remove('hidden');
+    if (errorDisplay) errorDisplay.classList.add('hidden');
 
     try {
-        const data = await fetchWithGuard(
-            APPLICATIONS_API_ALL, // 1st argument: URL string
-            'GET',                // 2nd argument: Method string
-            'Fetch All Applications' // 3rd argument: Operation Name string
+        const responseData = await fetchWithGuard(
+            APPLICATIONS_ALL_API, 
+            'GET', 
+            'Fetch All Applications',
+            { useAuth: true }
         );
+        
+        allApplications = responseData.applications || [];
 
-        // API 11.0 returns { applications: [...] }
-        const rawApplications = data.applications || [];
-        
-        // 1. Normalize the raw data and store globally
-        allApplications = rawApplications.map(normalizeApplicationData);
-        
-        // 2. Initial sort (default: date applied descending)
-        sortApplications();
-        
-        // 3. Update icons and render the sorted data
-        updateSortIcons();
-        renderApplications(allApplications);
+        // 1. Update the Summary Card count
+        if (totalApplicationCountElement) {
+            totalApplicationCountElement.textContent = allApplications.length.toString();
+        }
 
+        // 2. Initial sort and render (defaults to application_date desc)
+        sortApplications(currentSortKey); 
+        
     } catch (error) {
-        console.error("Failed to fetch applications:", error);
-        errorDisplay.textContent = `Failed to load applications. ${error.message}`;
-        errorDisplay.classList.remove('hidden');
+        console.error("Error fetching applications:", error);
+        displayError(error.message);
+        // Ensure total count is reset if there's an error
+        if (totalApplicationCountElement) {
+            totalApplicationCountElement.textContent = '0';
+        }
     } finally {
-        loadingIndicator.classList.add('hidden');
+        if (loadingIndicator) loadingIndicator.classList.add('hidden');
     }
 }
 
@@ -293,22 +280,20 @@ async function fetchApplications() {
 // ---------------------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // 1. Initialize Firebase and ensure auth state is ready
+    // Initialize Firebase/Auth services
     await initializeServices();
     
-    // 2. Setup DOM element references
-    applicationTableBody = document.getElementById('applicationTableBody'); // Updated ID
-    loadingIndicator = document.getElementById('loadingIndicator');
-    errorDisplay = document.getElementById('errorDisplay');
-
-    if (!applicationTableBody || !loadingIndicator || !errorDisplay) {
-        console.error("Dashboard initialization failed: Missing required DOM elements.");
-        return;
-    }
-
-    // 3. Kick off the data fetch
+    // Once services are ready, fetch the application data
     fetchApplications();
+    
+    // Set initial sort icon state (for default 'application_date' desc)
+    updateSortIcons();
+
+    // Re-initialize lucide icons for elements outside of the dynamic table
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
 });
 
-// Expose fetchApplications and handleSortClick for external calls (HTML, debugging)
-window.fetchApplications = fetchApplications;
+// --- Expose functions globally for inline HTML handlers ---
+window.handleSortClick = handleSortClick;

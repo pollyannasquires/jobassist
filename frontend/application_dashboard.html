@@ -23,10 +23,6 @@
     </script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
-        /* Ensure main content is below the fixed navbar */
-        .main-content {
-            padding-top: 64px; /* Matches h-16 navbar height */
-        }
         /* Style for sortable columns */
         .sortable-header {
             cursor: pointer;
@@ -38,84 +34,127 @@
             margin-left: 0.25rem;
             width: 1rem;
             height: 1rem;
-            transition: transform 0.2s;
+            transition: transform 0.15s ease-in-out;
+            color: #9ca3af; /* gray-400 */
         }
-        /* Style for active sort direction */
-        .sort-active .sort-icon {
+        .sort-active {
             color: #4f46e5; /* primary color */
+            font-weight: 600;
         }
     </style>
 </head>
-<body>
-    <!-- The navbar will be injected here by navbar.js -->
-    <header id="navbar-placeholder"></header>
+<body class="min-h-screen">
+    <!-- The fixed navbar is injected by navbar.js (h-16) -->
+    
+    <!-- Main Content Wrapper: Uses mt-16 to clear the fixed navbar (h-16) and flex to organize sidebar and dashboard -->
+    <div class="flex mt-16 min-h-[calc(100vh-64px)]">
+        
+        <!-- Sidebar Placeholder: dashboard_sidebar.js will inject the <aside> element here -->
+        <!-- The width and styling of the sidebar will be applied by the script's injected HTML -->
+        <div id="sidebar-container" class="flex-shrink-0">
+            <!-- Sidebar content injected here by dashboard_sidebar.js -->
+        </div>
 
-    <!-- START: MAIN APPLICATION CONTAINER -->
-    <main class="main-content min-h-screen">
-        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-            <div class="bg-white p-6 rounded-xl shadow-lg">
-                <h1 class="text-3xl font-extrabold text-gray-900 border-b pb-3 mb-6 flex items-center">
-                    <i data-lucide="layout-dashboard" class="w-7 h-7 mr-3 text-primary"></i>
-                    Application Dashboard
-                </h1>
+        <!-- Dashboard Content Area: Takes remaining width and allows scrolling -->
+        <main class="flex-1 overflow-x-auto">
+            <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+                <h1 class="text-3xl font-extrabold text-gray-900 mb-6">Application Dashboard</h1>
 
-                <!-- Loading and Error Indicators (Targeted by application_dashboard.js) -->
-                <div id="loadingIndicator" class="hidden text-center py-12">
-                    <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
-                    <p class="mt-4 text-gray-600">Loading all applications...</p>
-                </div>
-
-                <div id="errorDisplay" class="hidden p-4 text-sm font-medium text-red-700 bg-red-100 rounded-lg" role="alert">
-                    <!-- Error message will be injected here by the JS -->
+                <!-- Summary Card Section -->
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-3 lg:grid-cols-4 mb-8">
+                    <!-- Example Card: Total Applications -->
+                    <div class="bg-white overflow-hidden shadow-lg rounded-xl p-5 border border-gray-100">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0 bg-primary/10 rounded-full p-3">
+                                <i data-lucide="send" class="w-6 h-6 text-primary"></i>
+                            </div>
+                            <div class="ml-4 w-0 flex-1">
+                                <dt class="text-sm font-medium text-gray-500 truncate">Total Applications</dt>
+                                <dd class="text-3xl font-bold text-gray-900" id="totalApplicationCount">0</dd>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
-                <!-- START: Application Table Container -->
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <!-- Sortable by Date Applied -->
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    <div class="sortable-header group" data-sort-key="application_date" data-sort-direction="desc" onclick="window.handleSortClick('application_date')">
-                                        Date Applied
-                                        <i data-lucide="arrow-down-up" id="sort-icon-application_date" class="sort-icon w-4 h-4 ml-1 text-gray-400 group-hover:text-gray-600 transition"></i>
-                                    </div>
-                                </th>
-                                <!-- Sortable by Company Name -->
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    <div class="sortable-header group" data-sort-key="company_name_clean" data-sort-direction="none" onclick="window.handleSortClick('company_name_clean')">
-                                        Company
-                                        <i data-lucide="arrow-down-up" id="sort-icon-company_name_clean" class="sort-icon w-4 h-4 ml-1 text-gray-400 group-hover:text-gray-600 transition"></i>
-                                    </div>
-                                </th>
-                                <!-- Sortable by Job Title -->
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    <div class="sortable-header group" data-sort-key="job_title" data-sort-direction="none" onclick="window.handleSortClick('job_title')">
-                                        Job Title
-                                        <i data-lucide="arrow-down-up" id="sort-icon-job_title" class="sort-icon w-4 h-4 ml-1 text-gray-400 group-hover:text-gray-600 transition"></i>
-                                    </div>
-                                </th>
-                                <!-- Fixed Column -->
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                <!-- Fixed Column -->
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="applicationTableBody" class="bg-white divide-y divide-gray-200">
-                            <!-- Table rows will be rendered here by application_dashboard.js -->
-                            <tr>
-                                <td colspan="5" class="text-center py-4 text-gray-500">
-                                    Loading applications...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <!-- END: Application Table Container -->
+                <!-- Application History Table -->
+                <div class="bg-white shadow-lg rounded-xl overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                        <h2 class="text-xl font-semibold text-gray-900">Application History</h2>
+                    </div>
 
+                    <!-- Loading Indicator -->
+                    <div id="loadingIndicator" class="text-center py-10 hidden">
+                        <div class="animate-spin inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full" role="status"></div>
+                        <p class="mt-2 text-sm text-gray-600">Loading data...</p>
+                    </div>
+
+                    <!-- Error Display -->
+                    <div id="errorDisplay" class="p-4 bg-error/10 text-error font-medium hidden"></div>
+
+
+                    <!-- START: Application Table Container -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <!-- Sortable Header: Date Applied -->
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" 
+                                        id="header-date_applied" onclick="window.handleSortClick('date_applied')">
+                                        <div class="sortable-header">
+                                            Date Applied
+                                            <i data-lucide="arrow-up-down" class="sort-icon" id="sort-icon-date_applied"></i>
+                                        </div>
+                                    </th>
+                                    <!-- Sortable Header: Company Name -->
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" 
+                                        id="header-company_name_clean" onclick="window.handleSortClick('company_name_clean')">
+                                        <div class="sortable-header">
+                                            Company Name
+                                            <i data-lucide="arrow-up-down" class="sort-icon" id="sort-icon-company_name_clean"></i>
+                                        </div>
+                                    </th>
+                                    <!-- Sortable Header: Job Title -->
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                        id="header-title_name" onclick="window.handleSortClick('title_name')">
+                                        <div class="sortable-header">
+                                            Job Title
+                                            <i data-lucide="arrow-up-down" class="sort-icon" id="sort-icon-title_name"></i>
+                                        </div>
+                                    </th>
+                                    <!-- Non-Sortable Header: Status -->
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Status
+                                    </th>
+                                    <!-- NEW Sortable Header: Contact Count. Also serves as a click target for management.html. -->
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                        id="header-contact_count" onclick="window.handleSortClick('contact_count')">
+                                        <div class="sortable-header">
+                                            Contacts
+                                            <i data-lucide="arrow-up-down" class="sort-icon" id="sort-icon-contact_count"></i>
+                                        </div>
+                                    </th>
+                                    <!-- Non-Sortable Header: Actions -->
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="applicationTableBody" class="bg-white divide-y divide-gray-200">
+                                <!-- Rows injected by application_dashboard.js -->
+                                <tr>
+                                    <td colspan="6" class="text-center py-10 text-sm text-gray-500">
+                                        Loading applications...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- END: Application Table Container -->
+
+                </div>
             </div>
-        </div>
-    </main>
+        </main>
+    </div>
     <!-- END: MAIN APPLICATION CONTAINER -->
 
     <!-- START: Script loading section -->
@@ -131,6 +170,16 @@
     <script type="module" src="core-utils.js"></script> 
     <script type="module" src="navbar.js"></script>
     <script type="module" src="application_dashboard.js"></script> 
+
+    <!-- CRITICAL FIX: dashboard_sidebar.js is now a module that exports renderSidebar, 
+         so we must import and execute it to render the sidebar content. -->
+    <script type="module">
+        import { renderSidebar } from './dashboard_sidebar.js';
+
+        // Run the sidebar function as soon as the DOM is ready 
+        // to ensure the #sidebar-container element is found and populated.
+        document.addEventListener('DOMContentLoaded', renderSidebar);
+    </script>
 
     <script>
         // Initialize lucide icons for elements that are not dynamically inserted

@@ -34,7 +34,6 @@
         selectedExisting: document.getElementById('selectedExisting'),
         newCleanNameInput: document.getElementById('newCleanNameInput'),
         createNewBtn: document.getElementById('createNewBtn'),
-        selfMapBtn: document.getElementById('selfMapBtn'),
         batchMapBtn: document.getElementById('batchMapBtn')
     };
 
@@ -68,7 +67,6 @@
         elements.mapExistingBtn.disabled = !enabled || !selectedCompanyId || !nameIsSelected; 
         elements.newCleanNameInput.disabled = !enabled || !nameIsSelected;
         elements.createNewBtn.disabled = !enabled || !nameIsSelected;
-        elements.selfMapBtn.disabled = !enabled || !nameIsSelected;
         elements.batchMapBtn.disabled = !enabled || unmappedNames.length === 0;
 
         isProcessing = !enabled;
@@ -357,32 +355,9 @@
         );
     }
 
-    // Action 3: Skip & Self-Map (API 8.0)
-    async function handleSelfMap() {
-        if (!currentRawName) {
-            showMessage('error', 'A raw name must be selected to perform a self-map.');
-            return;
-        }
+    // Note: 'Self-Map' UI and handler removed per configuration; related API is no longer triggered from this UI.
 
-        const confirmed = await showConfirmationModal(
-            'Confirm Self-Map',
-            `Are you sure you want to create a new profile named "<strong>${currentRawName}</strong>" and map the raw name to it?`
-        );
-
-        if (confirmed) {
-            // Uses API 8.0: POST /api/map/self
-            await executeMapping(
-                '/map/self', 
-                // FIX: Sending raw_name as the PK for the mapping table update
-                { raw_name: currentRawName },
-                `Successfully created self-mapped profile "${currentRawName}".`
-            );
-        } else {
-            showMessage('info', 'Self-Map operation cancelled.');
-        }
-    }
-
-    // Action 4: Batch Map (API 1.5 - as per flow documentation)
+    // Action 4: Batch Map (client-side batch creation)
     async function handleBatchMap() {
         if (unmappedNames.length === 0) {
             showMessage('info', 'No unmapped names remaining for batch processing.');
@@ -391,25 +366,67 @@
 
         const confirmed = await showConfirmationModal(
             'Confirm Batch Map',
-            `Are you sure you want to attempt to batch map all <strong>${unmappedNames.length}</strong> remaining names to Target Company profiles? This action cannot be easily undone.`
+            `Are you sure you want to attempt to batch-create profiles for all <strong>${unmappedNames.length}</strong> remaining names? This will create a new clean profile for each raw name and map it.`
         );
 
-        if (confirmed) {
-            // Note: Batch map is assumed to be an asynchronous backend job.
-            // For simplicity in this UI, we just clear the local list and trust the backend.
-            await executeMapping(
-                '/map/batch', 
-                {}, // Payload is often empty for a trigger-only batch job
-                `Successfully started batch map for ${unmappedNames.length} names. The list will update automatically.`
-            );
-            unmappedNames = []; 
-            // Set currentRawName to null so the list renders correctly
-            currentRawName = null; 
-            renderUnmappedList();
-            setControlsEnabled(false);
-        } else {
+        if (!confirmed) {
             showMessage('info', 'Batch map operation cancelled.');
+            return;
         }
+
+        // Disable controls while processing
+        setControlsEnabled(false);
+
+        const itemsToProcess = Array.from(unmappedNames);
+        let successCount = 0;
+        const failures = [];
+
+        showMessage('info', `Starting batch create for ${itemsToProcess.length} names...`);
+
+        for (const item of itemsToProcess) {
+            const raw = item && item.raw_name ? item.raw_name : null;
+            if (!raw) continue;
+
+            try {
+                // Use the existing 'create new' API to create a profile named equal to the raw value
+                const resp = await fetch(API_BASE + '/map/new', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+                    body: JSON.stringify({ raw_name: raw, company_name_clean: raw })
+                });
+
+                const data = await resp.json().catch(() => ({}));
+
+                if (!resp.ok || data.status === 'error') {
+                    throw new Error(data.message || `API error (${resp.status})`);
+                }
+
+                // On success remove the name from the local list and increment counter
+                unmappedNames = unmappedNames.filter(n => n.raw_name !== raw);
+                successCount += 1;
+                // Re-render progressively so the UI updates as items complete
+                renderUnmappedList();
+
+                // Small delay to avoid hammering API
+                await new Promise(r => setTimeout(r, 150));
+            } catch (err) {
+                console.error('Batch item failed:', raw, err);
+                failures.push({ raw, message: err.message });
+            }
+        }
+
+        // Summary
+        if (failures.length === 0) {
+            showMessage('success', `Batch completed: ${successCount} profiles created and mapped.`);
+        } else {
+            const failedList = failures.slice(0, 8).map(f => f.raw).join(', ');
+            showMessage('error', `Batch finished with ${successCount} successes and ${failures.length} failures. Failed items: ${failedList}${failures.length > 8 ? ', ...' : ''}`);
+        }
+
+        // Reset selection & controls based on remaining items
+        currentRawName = null;
+        renderUnmappedList();
+        setControlsEnabled(unmappedNames.length > 0);
     }
 
 
@@ -434,7 +451,6 @@
         fetchSuggestions: fetchSuggestions,
         handleMapExisting: handleMapExisting,
         handleCreateNew: handleCreateNew,
-        handleSelfMap: handleSelfMap,
         handleBatchMap: handleBatchMap,
     };
 

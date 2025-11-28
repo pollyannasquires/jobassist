@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JobAssist | File Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: { 'primary': '#4f46e5' }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+        }
+        /* Layout Container */
+        .app-layout-container {
+            /* Fix the height to viewport minus navbar */
+            height: calc(100vh - 64px); 
+            margin-top: 64px; 
+        }
+        .container-padding {
+            padding: 1.5rem 1rem;
+        }
+        @media (min-width: 640px) {
+            .container-padding {
+                padding: 2.5rem 2rem;
+            }
+        }
+        /* Loading Spinner */
+        .loading-animation {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Column Widths */
+        .file-name-col { width: 35%; min-width: 250px; }
+        .type-col { width: 15%; min-width: 120px; }
+        .company-col { width: 25%; min-width: 200px; }
+        .date-col { width: 20%; min-width: 180px; }
+        .action-col { width: 5%; min-width: 80px; text-align: right; }
+    </style>
+</head>
+<body class="min-h-screen text-gray-800">
+    
+    <div class="flex app-layout-container overflow-hidden">
+        
+        <!-- Sidebar Container (Populated by dashboard_sidebar.js) -->
+        <div id="sidebar-container" class="w-64 flex-shrink-0 overflow-y-auto bg-white border-r border-gray-200">
+        </div>
+
+        <!-- Main Content -->
+        <main id="dashboard-content" class="flex-1 overflow-y-auto">
+            <div class="container-padding max-w-7xl mx-auto">
+                
+                <div class="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+                    <div>
+                        <h2 class="text-3xl font-bold text-gray-800 mb-2">My Documents</h2>
+                        <p class="text-gray-600">Directory of resumes, cover letters, and portfolios. Click a **File Name** to preview.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white shadow-xl rounded-xl overflow-hidden flex flex-col border border-gray-100">
+                    
+                    <div id="loadingMessage" class="flex justify-center items-center p-10 hidden">
+                        <div class="loading-animation mr-3"></div>
+                        <p class="text-gray-500">Loading documents...</p>
+                    </div>
+
+                    <div id="errorMessage" class="text-red-600 bg-red-50 p-6 hidden">
+                        <p class="font-bold">Error Loading Data:</p>
+                        <p id="errorDetail"></p>
+                    </div>
+
+                    <div class="overflow-x-auto overflow-y-auto max-h-[70vh]">
+                        <table class="min-w-full divide-y divide-gray-200 border-collapse">
+                            <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 bg-gray-50 file-name-col" onclick="sortTable('original_filename')">
+                                        File Name
+                                        <span class="sort-indicator ml-1" data-column="original_filename"></span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 bg-gray-50 type-col" onclick="sortTable('document_type')">
+                                        Type
+                                        <span class="sort-indicator ml-1" data-column="document_type"></span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 bg-gray-50 company-col" onclick="sortTable('company_name_clean')">
+                                        Company
+                                        <span class="sort-indicator ml-1" data-column="company_name_clean"></span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 bg-gray-50 date-col" onclick="sortTable('upload_timestamp')">
+                                        Uploaded On
+                                        <span class="sort-indicator ml-1" data-column="upload_timestamp"></span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 action-col">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="fileTableBody" class="bg-white divide-y divide-gray-200">
+                                <!-- Rows injected via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <p id="noDataMessage" class="p-10 text-center text-gray-500 hidden">
+                        No documents found.
+                    </p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script type="module" src="navbar.js"></script>
+    <script type="module" src="dashboard_sidebar.js"></script>
+    <script type="module" src="file_dashboard.js"></script>
+</body>
+</html>

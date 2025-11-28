@@ -732,8 +732,7 @@ def get_mapped_raw_names(company_id):
         print(f"General Error in get_mapped_raw_names: {e}")
         return jsonify({"status": "error", "message": "Processing error during raw name retrieval."}), 500
 
-    # Removed the manual 'finally: conn.close()' block
-# ----------------------------------------------------------------------
+    # Removed the manual 'finally: conn.close()' block# ----------------------------------------------------------------------
 # 6. MAP RAW NAME TO EXISTING COMPANY (Standardization Action)
 # ----------------------------------------------------------------------
 @app.route('/api/map/existing', methods=['POST'])
@@ -873,145 +872,77 @@ def map_to_new():
         return jsonify({"status": "error", "message": "Processing error during map to new."}), 500
     finally:
         if conn: conn.close()
-        
-def execute_mapping_transaction(raw_name, clean_name, target_interest):
-    """
-    Helper function to handle the complex database logic for mapping a raw name 
-    to a standardized (clean) company profile. This logic is fully transactional.
-
-    The steps are:
-    1. Check if the raw_name is already mapped (return 409 if true).
-    2. Find or create the standardized company profile (Upsert logic).
-    3. Insert the new mapping record.
-    """
-    conn = None
-    cur = None
-    
-    print(f"DEBUG 8.0: Starting mapping transaction for raw_name: '{raw_name}' -> clean_name: '{clean_name}'")
-
-    try:
-        # Establish connection
-        conn = get_db_connection()
-        if conn is None:
-            return {"status": "error", "message": "Database connection failed."}, 500
-        
-        # Get the Cursor (Using the DictCursor is highly recommended for clarity, 
-        # but the original used a default cursor for fetchone()[0])
-        # We will stick to the default cursor as per the original file's implementation 
-        # in the helper, but use DictCursor in the main endpoint for consistency.
-        cur = conn.cursor()
-        
-        # Ensure the transaction is atomic
-        conn.autocommit = False
-
-        # 1. Check if raw_name is already mapped
-        sql_check = "SELECT company_id FROM company_name_mapping WHERE raw_name = %s;"
-        cur.execute(sql_check, (raw_name,))
-        if cur.fetchone():
-            conn.rollback()
-            return {"status": "error", "message": f"Raw name '{raw_name}' is already mapped."}, 409
-
-        # 2. Find or create the standardized company profile (Upsert logic)
-        
-        # Try to find existing company_id for the clean_name
-        sql_find_company = "SELECT company_id FROM companies WHERE company_name_clean = %s;"
-        cur.execute(sql_find_company, (clean_name,))
-        company_row = cur.fetchone()
-        
-        if company_row:
-            # Company exists, use its ID
-            company_id = company_row[0]
-            action = "reused"
-            print(f"DEBUG 8.0: Found existing company ID: {company_id}")
-            
-            # Optional: Update target_interest if it was set to False and the new map suggests True
-            sql_update_target = "UPDATE companies SET target_interest = %s WHERE company_id = %s AND target_interest = FALSE;"
-            cur.execute(sql_update_target, (target_interest, company_id))
-        else:
-            # Company does not exist, create a new profile
-            sql_create_company = """
-                INSERT INTO companies 
-                    (company_name_clean, target_interest, notes)
-                VALUES 
-                    (%s, %s, %s) 
-                RETURNING company_id;
-            """
-            # Notes is initialized to NULL/None for new creation
-            cur.execute(sql_create_company, (clean_name, target_interest, None))
-            company_id = cur.fetchone()[0]
-            action = "created"
-            print(f"DEBUG 8.0: Created new company ID: {company_id}")
-
-
-        # 3. Insert the new mapping record
-        mapping_id = str(uuid.uuid4()) # Generate a UUID for the mapping ID if the table uses one
-        sql_insert_mapping = """
-            INSERT INTO company_name_mapping 
-                (mapping_id, raw_name, company_id, date_mapped)
-            VALUES 
-                (%s, %s, %s, NOW());
-        """
-        cur.execute(sql_insert_mapping, (mapping_id, raw_name, company_id))
-
-        # 4. Commit the transaction
-        conn.commit()
-        print(f"DEBUG 8.0: Transaction committed successfully. Action: {action}, Mapping ID: {mapping_id}")
-
-        return {
-            "status": "success", 
-            "message": f"Mapping successful. Company {action}: {company_id}.",
-            "company_id": company_id,
-            "raw_name": raw_name,
-            "clean_name": clean_name
-        }, 200
-
-    except psycopg2.Error as e:
-        if conn:
-            conn.rollback()
-        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
-        print(f"PostgreSQL Error in execute_mapping_transaction for raw name '{raw_name}': {db_error_detail}")
-        traceback.print_exc()
-        return {"status": "error", "message": f"Database error during mapping transaction: {db_error_detail}"}, 500
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        print(f"General Error in execute_mapping_transaction for raw name '{raw_name}': {e}")
-        traceback.print_exc()
-        return {"status": "error", "message": "Processing error during mapping transaction."}, 500
-    finally:
-        if conn:
-            conn.autocommit = True
-            if cur: cur.close()
-            conn.close()
-
-
+          
 # ----------------------------------------------------------------------
 # 8. MAP RAW NAME TO SELF (Standardization Action)
-# POST /api/map/self
 # ----------------------------------------------------------------------
 @app.route('/api/map/self', methods=['POST'])
-@authenticate_request()
+@mock_auth_required
 def map_to_self():
     """
-    Endpoint 8.0: Cleanup Action 3: Use the raw name as the clean name and map 
-    to it (flagged as TARGET by default).
+    Creates a new company profile using the raw name as the clean name, 
+    and maps the raw name (string PK) to that new profile in a single transaction.
+    
+    *** FIX: Changed request payload from raw_name_id (int) to raw_name (string) ***
     """
     data = request.get_json()
+    # CRITICAL FIX: Expect 'raw_name' string, not 'raw_name_id' integer
     raw_name = data.get('raw_name')
-    
-    # 1. Input Validation
-    if not raw_name:
-        return jsonify({"status": "error", "message": "raw_name is required."}), 400
 
-    # 2. Set parameters for self-map: clean_name is the raw_name, and target_interest is TRUE by default
-    target_interest = True 
-    response_data, status_code = execute_mapping_transaction(raw_name, raw_name, target_interest)
-    
-    # 3. Customize success message for the self-map endpoint
-    if status_code == 200 and response_data.get("status") == "success":
-         response_data["message"] = f"'{raw_name}' self-mapped and flagged as a target company. Company ID: {response_data['company_id']}"
-    
-    return jsonify(response_data), status_code# ----------------------------------------------------------------------
+    if raw_name is None:
+        return jsonify({"status": "error", "message": "raw_name (string) is required."}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # 1. Insert new company using the raw name as the clean name
+        sql_insert_company = """
+            INSERT INTO companies (company_name_clean, user_id)
+            VALUES (%s, %s)
+            RETURNING company_id;
+        """
+        # raw_name is used as the clean name for the new company
+        cur.execute(sql_insert_company, (raw_name, MOCK_USER_ID))
+        new_company_id = cur.fetchone()[0]
+        
+        # 2. Update mapping using the raw_name string key
+        sql_update_mapping = """
+            UPDATE company_name_mapping
+            SET company_id = %s
+            WHERE raw_name = %s AND company_id IS NULL;
+        """
+        # Use raw_name as the primary key/identifier
+        cur.execute(sql_update_mapping, (new_company_id, raw_name))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            return jsonify({
+                "status": "error", 
+                "message": "Mapping not updated. Raw Name not found or already mapped. New company was not created."
+            }), 404
+
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": f"New company ID {new_company_id} created (using raw name: '{raw_name}') and mapping completed successfully."
+        }), 201
+
+    except psycopg2.Error as e:
+        if conn: conn.rollback()
+        db_error_detail = getattr(e.diag, 'message_primary', 'N/A')
+        print(f"PostgreSQL Error in map_to_self: {db_error_detail}")
+        return jsonify({"status": "error", "message": "Database error during self map."}), 500
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"General Error in map_to_self: {e}")
+        return jsonify({"status": "error", "message": "Processing error during self map."}), 500
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+# ----------------------------------------------------------------------
 # 9. DOCUMENT UPLOAD API: POST /api/application/<uuid:application_id>/documents
 # FIX: Using standardized two-step database access (get_db_connection then get_db_cursor(conn, ...))
 # ----------------------------------------------------------------------
