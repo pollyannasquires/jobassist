@@ -122,6 +122,7 @@ DB_PASS="linkedin"
 DB_NAME="contact_db"
 PSQL="/usr/bin/psql"
 SQL_FILE="${INSTALL_DIR}/bin/contact_db_ddl.sql"
+USER_FILE="${INSTALL_DIR}/bin/create_mock_user.psql"
 CSV_FILE="${INSTALL_DIR}/data/mock_contacts.csv"
 
 case "$1" in
@@ -144,7 +145,12 @@ case "$1" in
          # IMPORTANT: The postgres user needs read access to the SQL file
          # We grant world-read specifically to this file for the duration of the setup
             chmod 644 "$SQL_FILE"
-            su - postgres -c "$PSQL -d $DB_NAME -f $SQL_FILE" 
+            su - postgres -c "$PSQL -d $DB_NAME -f $SQL_FILE"             
+            
+            su - postgres -c "$PSQL -d $DB_NAME -f ${USER_FILE}" 
+
+
+
         else echo "ERROR: Schema file not found at $SQL_FILE" >&2
             exit 1
         fi

@@ -1,3 +1,3 @@
 INSERT INTO users (user_id, email, created_at) 
-VALUES ('12345678-1234-5678-1234-567812345678', 'jobert@jobassist.com', NOW())
+VALUES ('12345678-1234-5678-1234-567812345678', 'jobert@localhost', NOW())
 ON CONFLICT (user_id) DO NOTHING;
