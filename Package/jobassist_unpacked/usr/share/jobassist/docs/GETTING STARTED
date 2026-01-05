@@ -1,0 +1,19 @@
+Here are some commands needed to get started with the mock data.
+The below command sets up company table based on the mock data.
+
+sudo -u jobert /usr/share/jobassist/venv/bin/python /usr/share/jobassist/bin/regenerate_unmapped.py
+
+You must then go to your webpage and execute "Batch Create" by clicking the button.
+If you've added your host to /etc/hosts as testy you can access it at:
+
+http://testy/cleanup.html
+
+Alternatively you can use localhost or ip address if you have not set up a custom hostname.
+
+If you choose to delete the mock data and import linkedin data.  Here are the commands. (You should replace mock_contacts.csv with the CSV data from linkedin.)
+
+CSV_FILE="/usr/share/jobassist/data/mock_contacts.csv"
+
+su - postgres -c "psql -d contact_db -c \"delete from contacts;\""
+
+su - postgres -c "psql -d contact_db -c \"\\copy contacts (first_name, last_name, url, email_address, company, position, connected_on) FROM '$CSV_FILE' WITH (FORMAT CSV, HEADER TRUE);\""

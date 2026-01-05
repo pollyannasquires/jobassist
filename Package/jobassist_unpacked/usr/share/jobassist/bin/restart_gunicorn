@@ -1,0 +1,4 @@
+#!/bin/bash
+sudo systemctl restart contact_db_gunicorn.service
+sleep 5s 
+sudo systemctl status contact_db_gunicorn.service

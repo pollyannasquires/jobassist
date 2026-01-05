@@ -1,0 +1,164 @@
+#!/bin/sh
+# Exit on any error
+set -e
+
+# --- LOGGING (POSIX COMPATIBLE) ---
+# We use standard redirection instead of process substitution to avoid Status 127
+#exec > /tmp/jobassist_install.log 2>&1
+#set -x
+
+
+# Define application variables
+APP_NAME="contact_db_gunicorn"
+APP_USER="jobert"
+APP_GROUP="jobert"
+INSTALL_DIR="/usr/share/jobassist"
+
+case "$1" in
+    configure)
+        # Create a dedicated user and group for security
+        if ! getent group "${APP_GROUP}" >/dev/null; then
+            addgroup --system "${APP_GROUP}"
+        fi
+        if ! getent passwd "${APP_USER}" >/dev/null; then
+            adduser --quiet --system --ingroup "${APP_GROUP}" --disabled-login --no-create-home "${APP_USER}"
+        fi
+        
+        # Set ownership and permissions for application directory (adjust path as needed)
+        chown -R "${APP_USER}":"${APP_GROUP}" "${INSTALL_DIR}"
+        chmod -R go-w "${INSTALL_DIR}"
+
+        # create python virtual environment and install dependencies
+        if [ ! -d "${INSTALL_DIR}/venv" ]; then
+            echo "Creating Python virtual environment..."
+            python3 -m venv "${INSTALL_DIR}/venv"
+            "${INSTALL_DIR}/venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
+        fi  
+    
+        # Enable and start the systemd service
+        echo "Enabling and starting systemd service for ${APP_NAME}..."
+        systemctl daemon-reload
+        systemctl enable "${APP_NAME}".service
+        systemctl start "${APP_NAME}".service
+    ;;
+
+    abort-install|abort-upgrade|abort-remove|upgrade|remove|purge)
+        # Do nothing for other dpkg actions
+    ;;
+    
+    *)
+        echo "Usage: $0 {configure|abort-install|abort-upgrade|abort-remove|upgrade|remove|purge}" >&2
+        exit 1
+    ;;
+esac
+
+# Configuration variables
+APP_NAME="jobassist"
+CONF_FILE="/etc/nginx/sites-available/$APP_NAME"
+ENABLED_LINK="/etc/nginx/sites-enabled/$APP_NAME"
+
+case "$1" in
+    configure)
+    # Disable the default Nginx site to avoid conflicts
+        if [ -L "/etc/nginx/sites-enabled/default" ]; then
+            echo "Disabling default Nginx site..."
+            rm /etc/nginx/sites-enabled/default
+        fi
+
+        echo "Configuring Nginx for $APP_NAME..." 
+        # Create the Nginx configuration file
+        cat <<EOF > "$CONF_FILE"
+server {
+    listen 80 default_server;
+    server_name $APP_NAME; 
+
+    # --- STATIC FILE CONFIGURATION ---
+    root $INSTALL_DIR/frontend; 
+    index index.html; 
+
+    client_max_body_size 50M; 
+
+    # Serve uploaded documents directly
+    location /documents/ {
+        alias $INSTALL_DIR/filestore/; 
+        internal; 
+        expires max; 
+        autoindex off; 
+    }
+
+    # Reverse proxy for Gunicorn API
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000; 
+        proxy_set_header Host \$host; 
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; 
+        proxy_redirect off; 
+    }
+
+    # Default routing for SPA or static files
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+EOF
+
+        # Create symlink to enable the site if it doesn't exist
+        if [ ! -f "$ENABLED_LINK" ]; then
+            ln -s "$CONF_FILE" "$ENABLED_LINK"
+        fi
+
+        # Test Nginx configuration and reload
+        nginx -t && systemctl reload nginx || echo "Nginx config test failed. Please check manually."
+    ;;
+
+
+
+esac
+
+# DATABASE SETUP
+#- Variables ---
+DB_USER="jobert"
+DB_PASS="linkedin"
+DB_NAME="contact_db"
+PSQL="/usr/bin/psql"
+SQL_FILE="${INSTALL_DIR}/bin/contact_db_ddl.sql"
+CSV_FILE="${INSTALL_DIR}/data/mock_contacts.csv"
+
+case "$1" in
+    configure)
+        echo "Configuring PostgreSQL..."
+
+        # 1. Create User and Database if they don't exist
+        sudo -u postgres ${PSQL} -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1 || \
+        sudo -u postgres ${PSQL} -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASS';"
+        
+        sudo -u postgres ${PSQL} -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1 || \
+        sudo -u postgres ${PSQL} -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
+
+        # 2. Run Schema Creation Script
+        echo "Initializing Database Schema..."
+        # 2. Schema Execution from File
+        if [ -f "$SQL_FILE" ]; then
+            echo "Executing schema from $SQL_FILE"
+    
+         # IMPORTANT: The postgres user needs read access to the SQL file
+         # We grant world-read specifically to this file for the duration of the setup
+            chmod 644 "$SQL_FILE"
+            su - postgres -c "$PSQL -d $DB_NAME -f $SQL_FILE" 
+        else echo "ERROR: Schema file not found at $SQL_FILE" >&2
+            exit 1
+        fi
+
+    # 3. Import Mock Data
+    # Note: double backslash is needed to escape the psql meta-command in a shell string
+    if [ -f "$CSV_FILE" ]; then
+        echo "Importing mock data from $CSV_FILE"
+        su - postgres -c "$PSQL -d $DB_NAME -c \"\\copy contacts (first_name, last_name, url, email_address, company, position, connected_on) FROM '$CSV_FILE' WITH (FORMAT CSV, HEADER TRUE);\""
+    else
+        echo "Warning: CSV file not found at $CSV_FILE. Skipping import."
+    fi
+    ;;
+
+esac
+
+exit 0
